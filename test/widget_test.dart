@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starfields/main.dart';
+import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
 void main() {
@@ -22,5 +24,66 @@ void main() {
     await tester.pump(const Duration(hours: 1));
     await tester.pump(const Duration(milliseconds: 16));
     expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  group('controls', () {
+    Future<void> pumpFrames(WidgetTester tester, int frames) async {
+      for (var i = 0; i < frames; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    testWidgets('slider changes the star count without restarting the field', (tester) async {
+      await tester.pumpWidget(const MyApp());
+      await pumpFrames(tester, 150); // all 200 stars spawned (one per 8 ms)
+      expect(find.text('stars 200 / 200'), findsOneWidget);
+
+      tester.widget<Slider>(find.byType(Slider)).onChanged!(starCountSteps.indexOf(10000).toDouble());
+      await pumpFrames(tester, 2);
+      expect(find.text('stars 10,000 / 10,000'), findsOneWidget);
+    });
+
+    testWidgets('explode and restore', (tester) async {
+      await tester.pumpWidget(const MyApp());
+      await pumpFrames(tester, 10);
+
+      await tester.tap(find.text('Explode'));
+      await pumpFrames(tester, 2);
+      expect(find.text('Restore'), findsOneWidget);
+      expect(find.text('stars 200 / 200'), findsOneWidget); // every star at once
+
+      await tester.pump(const Duration(hours: 1));
+      await pumpFrames(tester, 2);
+      expect(find.text('stars 0 / 200'), findsOneWidget);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+
+      await tester.tap(find.text('Restore'));
+      await pumpFrames(tester, 150);
+      expect(find.text('Explode'), findsOneWidget);
+      expect(find.text('stars 200 / 200'), findsOneWidget);
+    });
+
+    testWidgets('shader renderer is not selectable yet', (tester) async {
+      await tester.pumpWidget(const MyApp());
+      await tester.tap(find.text('Shader'));
+      await pumpFrames(tester, 2);
+      final button = tester.widget<SegmentedButton<StarfieldRenderer>>(find.byType(SegmentedButton<StarfieldRenderer>));
+      expect(button.selected, {StarfieldRenderer.batched});
+    });
+
+    testWidgets('H hides and shows the controls', (tester) async {
+      await tester.pumpWidget(const MyApp());
+      await pumpFrames(tester, 2);
+      expect(find.byType(FrameStatsPanel), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+      await pumpFrames(tester, 1);
+      expect(find.byType(FrameStatsPanel), findsNothing);
+      expect(find.byType(StarfieldControlBar), findsNothing);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+      await pumpFrames(tester, 1);
+      expect(find.byType(FrameStatsPanel), findsOneWidget);
+    });
   });
 }

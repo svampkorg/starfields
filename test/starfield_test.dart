@@ -102,4 +102,50 @@ void main() {
     field.update(1e7);
     expect(field.visibleCount, 100);
   });
+
+  group('resize', () {
+    List<double> snapshot(Starfield f) => [
+      for (var i = 0; i < f.visibleCount; i++) ...[f.x[i], f.y[i], f.size[i]],
+    ];
+
+    test('growing keeps existing stars and adds the new ones at once', () {
+      final field = Starfield(count: 100, random: Random(5))..update(5);
+      final before = snapshot(field);
+      field
+        ..resize(1000, time: 5)
+        ..update(5);
+      expect(field.count, 1000);
+      expect(field.visibleCount, 1000);
+      expect(snapshot(field).sublist(0, before.length), before);
+    });
+
+    test('shrinking keeps the first stars', () {
+      final field = Starfield(count: 300, random: Random(6))..update(5);
+      final before = snapshot(field);
+      field
+        ..resize(50, time: 5)
+        ..update(5);
+      expect(field.visibleCount, 50);
+      expect(snapshot(field), before.sublist(0, 50 * 3));
+    });
+
+    test('added stars move and respawn like the others', () {
+      final field = Starfield(count: 10, random: Random(8))..update(1);
+      field.resize(20, time: 1);
+      for (var t = 1.0; t < 60; t += 1 / 30) {
+        field.update(t);
+        expect(field.visibleCount, 20);
+      }
+    });
+
+    test('growing an exploded field starts a new burst', () {
+      final field = Starfield(count: 10, respawn: false, random: Random(9))..update(1e6);
+      expect(field.isFinished, isTrue);
+      field
+        ..resize(30, time: 1e6)
+        ..update(1e6);
+      expect(field.visibleCount, 20);
+      expect(field.isFinished, isFalse);
+    });
+  });
 }

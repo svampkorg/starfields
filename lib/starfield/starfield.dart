@@ -36,7 +36,9 @@ class Starfield {
   /// How far behind a respawn may lag before it is moved to the current time.
   static const double _maxCatchUpSeconds = 1;
 
-  final int count;
+  /// Number of stars; change it with [resize].
+  int get count => _count;
+  int _count = 0;
 
   /// Duration of one step of the original simulation, in seconds. Also the
   /// interval at which stars are added at start-up.
@@ -48,47 +50,71 @@ class Starfield {
   final Random _random;
 
   // Per-star constants.
-  final Float64List _rate;
-  final Float64List _growthPerSecond;
+  Float64List _rate = Float64List(0);
+  Float64List _growthPerSecond = Float64List(0);
 
   // Per-life values, replaced on respawn.
-  final Float64List _originX;
-  final Float64List _originY;
-  final Float64List _spawnTime;
-  final Float64List _growStart;
-  final Float64List _lifetime;
+  Float64List _originX = Float64List(0);
+  Float64List _originY = Float64List(0);
+  Float64List _spawnTime = Float64List(0);
+  Float64List _growStart = Float64List(0);
+  Float64List _lifetime = Float64List(0);
 
   /// Output of [update]: the first [visibleCount] entries are the stars that
   /// are currently on screen.
-  final Float64List x;
-  final Float64List y;
-  final Float64List size;
+  Float64List get x => _x;
+  Float64List get y => _y;
+  Float64List get size => _size;
+  Float64List _x = Float64List(0);
+  Float64List _y = Float64List(0);
+  Float64List _size = Float64List(0);
   int visibleCount = 0;
 
-  Starfield({required this.count, this.tickSeconds = 0.008, this.respawn = true, Random? random})
-    : _random = random ?? Random(),
-      _rate = Float64List(count),
-      _growthPerSecond = Float64List(count),
-      _originX = Float64List(count),
-      _originY = Float64List(count),
-      _spawnTime = Float64List(count),
-      _growStart = Float64List(count),
-      _lifetime = Float64List(count),
-      x = Float64List(count),
-      y = Float64List(count),
-      size = Float64List(count) {
+  /// Creates [count] stars. With [respawn] they appear one per tick from
+  /// [startTime], like the original start-up; otherwise all at once.
+  Starfield({required int count, this.tickSeconds = 0.008, this.respawn = true, double startTime = 0, Random? random})
+    : _random = random ?? Random() {
+    _ensureCapacity(count);
     for (var i = 0; i < count; i++) {
-      final speed = _random.nextInt(10) + 1;
-      _rate[i] = log(1 + speed * _speedFactor) / tickSeconds;
-      _growthPerSecond[i] = _growthPerTick[speed - 1] / tickSeconds;
-      // The first life starts anywhere on screen; later ones at the center.
-      _startLife(
-        i,
-        time: respawn ? i * tickSeconds : 0,
-        originX: _random.nextDouble() - 0.5,
-        originY: _random.nextDouble() - 0.5,
-      );
+      _initStar(i, startTime + (respawn ? i * tickSeconds : 0));
     }
+    _count = count;
+  }
+
+  /// Changes the number of stars at [time] without disturbing the existing
+  /// ones. Added stars appear at once, anywhere on screen; removed stars are
+  /// the most recently added ones.
+  void resize(int newCount, {required double time}) {
+    _ensureCapacity(newCount);
+    for (var i = _count; i < newCount; i++) {
+      _initStar(i, time);
+    }
+    _count = newCount;
+  }
+
+  void _initStar(int i, double spawnTime) {
+    final speed = _random.nextInt(10) + 1;
+    _rate[i] = log(1 + speed * _speedFactor) / tickSeconds;
+    _growthPerSecond[i] = _growthPerTick[speed - 1] / tickSeconds;
+    // The first life starts anywhere on screen; later ones at the center.
+    _startLife(i, time: spawnTime, originX: _random.nextDouble() - 0.5, originY: _random.nextDouble() - 0.5);
+  }
+
+  void _ensureCapacity(int capacity) {
+    if (capacity <= _rate.length) return;
+    // Grow geometrically so repeated small resizes stay cheap.
+    final newCapacity = max(capacity, _rate.length * 2);
+    Float64List grow(Float64List list) => Float64List(newCapacity)..setRange(0, list.length, list);
+    _rate = grow(_rate);
+    _growthPerSecond = grow(_growthPerSecond);
+    _originX = grow(_originX);
+    _originY = grow(_originY);
+    _spawnTime = grow(_spawnTime);
+    _growStart = grow(_growStart);
+    _lifetime = grow(_lifetime);
+    _x = grow(_x);
+    _y = grow(_y);
+    _size = grow(_size);
   }
 
   /// True when no star will ever be visible again.
@@ -97,7 +123,7 @@ class Starfield {
   /// Evaluates every star at [time] seconds since the start.
   void update(double time) {
     var n = 0;
-    for (var i = 0; i < count; i++) {
+    for (var i = 0; i < _count; i++) {
       var age = time - _spawnTime[i];
       if (age < 0) continue;
       if (age >= _lifetime[i] && !respawn) continue;
@@ -110,9 +136,9 @@ class Starfield {
         age = time - _spawnTime[i];
       }
       final scale = exp(_rate[i] * age);
-      x[n] = _originX[i] * scale;
-      y[n] = _originY[i] * scale;
-      size[n] = initialSize + _growthPerSecond[i] * max(0.0, age - _growStart[i]);
+      _x[n] = _originX[i] * scale;
+      _y[n] = _originY[i] * scale;
+      _size[n] = initialSize + _growthPerSecond[i] * max(0.0, age - _growStart[i]);
       n++;
     }
     visibleCount = n;

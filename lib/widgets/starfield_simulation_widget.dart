@@ -6,6 +6,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:starfields/starfield/starfield.dart';
 
+/// How the stars are drawn.
+enum StarfieldRenderer {
+  /// One atlas draw for all glows and one vertices draw for all tails (Phase 1).
+  batched('Batched'),
+
+  /// Full-screen fragment shader (Phase 2, not implemented yet).
+  shader('Shader');
+
+  const StarfieldRenderer(this.label);
+  final String label;
+
+  bool get isAvailable => this == batched;
+}
+
 class StarfieldSimulationWidget extends StatefulWidget {
   final int numberOfStars;
 
@@ -13,7 +27,19 @@ class StarfieldSimulationWidget extends StatefulWidget {
   /// Higher is slower.
   final int speed;
   final bool explode;
-  const StarfieldSimulationWidget({super.key, required this.numberOfStars, this.speed = 8, this.explode = false});
+  final StarfieldRenderer renderer;
+
+  /// Called whenever the number of stars on screen changes.
+  final ValueChanged<int>? onVisibleCountChanged;
+
+  const StarfieldSimulationWidget({
+    super.key,
+    required this.numberOfStars,
+    this.speed = 8,
+    this.explode = false,
+    this.renderer = StarfieldRenderer.batched,
+    this.onVisibleCountChanged,
+  }) : assert(numberOfStars >= 0);
 
   @override
   State<StarfieldSimulationWidget> createState() => _StarfieldSimulationWidgetState();
@@ -25,40 +51,57 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   final ui.Image _sprite = StarsPainter.createSprite();
   late StarsPainter _painter;
 
+  /// Simulation clock in seconds. Keeps counting across ticker restarts (the
+  /// ticker stops once an explosion is over), so spawn times stay valid.
+  double _now = 0;
+  double _tickerStart = 0;
+  int _reportedVisibleCount = -1;
+
   @override
   void initState() {
     super.initState();
-    _createPainter();
-    _ticker = createTicker(_tick)..start();
+    _createStarfield();
+    _ticker = createTicker(_tick);
+    _startTicker();
   }
 
   @override
   void didUpdateWidget(StarfieldSimulationWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.numberOfStars != widget.numberOfStars ||
-        oldWidget.speed != widget.speed ||
-        oldWidget.explode != widget.explode) {
-      _createPainter();
-      _ticker
-        ..stop()
-        ..start();
+    if (oldWidget.speed != widget.speed || oldWidget.explode != widget.explode) {
+      _createStarfield();
+      _startTicker();
+    } else if (oldWidget.numberOfStars != widget.numberOfStars) {
+      _painter.starfield.resize(widget.numberOfStars, time: _now);
+      _startTicker();
     }
   }
 
-  void _createPainter() {
+  void _createStarfield() {
     final starfield = Starfield(
       count: widget.numberOfStars,
       tickSeconds: widget.speed / 1000,
       respawn: !widget.explode,
+      startTime: _now,
     );
     _painter = StarsPainter(starfield: starfield, sprite: _sprite, repaint: _time);
   }
 
+  void _startTicker() {
+    if (_ticker.isActive) return;
+    _tickerStart = _now;
+    _ticker.start();
+  }
+
   void _tick(Duration elapsed) {
-    final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+    _now = _tickerStart + elapsed.inMicroseconds / Duration.microsecondsPerSecond;
     final starfield = _painter.starfield;
-    starfield.update(seconds);
-    _time.value = seconds;
+    starfield.update(_now);
+    _time.value = _now;
+    if (starfield.visibleCount != _reportedVisibleCount) {
+      _reportedVisibleCount = starfield.visibleCount;
+      widget.onVisibleCountChanged?.call(_reportedVisibleCount);
+    }
     if (starfield.isFinished) _ticker.stop();
   }
 
@@ -75,7 +118,12 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
     return Stack(
       fit: StackFit.expand,
       children: [
-        RepaintBoundary(child: CustomPaint(painter: _painter)),
+        RepaintBoundary(
+          child: switch (widget.renderer) {
+            StarfieldRenderer.batched => CustomPaint(painter: _painter),
+            StarfieldRenderer.shader => throw UnimplementedError('Shader renderer arrives in Phase 2'),
+          },
+        ),
         if (widget.explode)
           TweenAnimationBuilder<double>(
             duration: const Duration(milliseconds: 400),
@@ -131,19 +179,28 @@ class StarsPainter extends CustomPainter {
     return Int32List.fromList([white, white, red, white, red, red, red, red, clear, red, clear, clear]);
   }();
 
-  final Float32List _transforms;
-  final Float32List _rects;
-  final Float32List _tailPositions;
-  final Int32List _tailColors;
+  // Reusable per-star buffers, grown with the starfield.
+  Float32List _transforms = Float32List(0);
+  Float32List _rects = Float32List(0);
+  Float32List _tailPositions = Float32List(0);
+  Int32List _tailColors = Int32List(0);
   final Paint _spritePaint = Paint()..filterQuality = FilterQuality.low;
   final Paint _tailPaint = Paint();
 
-  StarsPainter({required this.starfield, required this.sprite, super.repaint})
-    : _transforms = Float32List(starfield.count * 4),
-      _rects = Float32List(starfield.count * 4),
-      _tailPositions = Float32List(starfield.count * _tailVertices * 2),
-      _tailColors = Int32List(starfield.count * _tailVertices) {
-    for (var i = 0; i < starfield.count; i++) {
+  StarsPainter({required this.starfield, required this.sprite, super.repaint}) {
+    _ensureCapacity(starfield.count);
+  }
+
+  void _ensureCapacity(int stars) {
+    final capacity = _rects.length ~/ 4;
+    if (stars <= capacity) return;
+    final newCapacity = max(stars, capacity * 2);
+    _transforms = Float32List(newCapacity * 4);
+    _rects = Float32List(newCapacity * 4);
+    _tailPositions = Float32List(newCapacity * _tailVertices * 2);
+    _tailColors = Int32List(newCapacity * _tailVertices);
+    // Constant per star: the whole sprite, and the tail color stops.
+    for (var i = 0; i < newCapacity; i++) {
       _rects.setAll(i * 4, const [0, 0, spriteRadius * 2, spriteRadius * 2]);
       _tailColors.setAll(i * _tailVertices, _tailColorPattern);
     }
@@ -172,6 +229,7 @@ class StarsPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final count = starfield.visibleCount;
     if (count == 0) return;
+    _ensureCapacity(count);
     final centerX = size.width / 2;
     final centerY = size.height / 2;
 
