@@ -30,7 +30,10 @@ void main() {
           backgroundColor: Colors.black,
           body: Stack(
             fit: StackFit.expand,
-            children: [StarfieldSimulationWidget(numberOfStars: stars), ScalingGradientWidget()],
+            children: [
+              StarfieldSimulationWidget(numberOfStars: stars),
+              ScalingGradientWidget(),
+            ],
           ),
         ),
       ),

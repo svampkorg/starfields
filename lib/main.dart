@@ -35,7 +35,10 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return const Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(fit: StackFit.expand, children: [StarfieldSimulationWidget(numberOfStars: 200), ScalingGradientWidget()]),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [StarfieldSimulationWidget(numberOfStars: 200), ScalingGradientWidget()],
+      ),
     );
   }
 }

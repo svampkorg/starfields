@@ -81,17 +81,16 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeOutSine,
             tween: Tween<double>(begin: 1.0, end: 0.0),
-            builder:
-                (context, value, child) => DecoratedBox(
-                  decoration: BoxDecoration(
-                    backgroundBlendMode: BlendMode.hardLight,
-                    gradient: RadialGradient(
-                      radius: value * 2.2,
-                      colors: const [Colors.white, Colors.blue, Colors.transparent],
-                      stops: const [0.02, 0.2, 1.0],
-                    ),
-                  ),
+            builder: (context, value, child) => DecoratedBox(
+              decoration: BoxDecoration(
+                backgroundBlendMode: BlendMode.hardLight,
+                gradient: RadialGradient(
+                  radius: value * 2.2,
+                  colors: const [Colors.white, Colors.blue, Colors.transparent],
+                  stops: const [0.02, 0.2, 1.0],
                 ),
+              ),
+            ),
           ),
         DecoratedBox(
           decoration: BoxDecoration(

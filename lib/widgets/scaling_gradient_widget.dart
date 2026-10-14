@@ -10,11 +10,7 @@ class ScalingGradientWidget extends StatelessWidget {
         backgroundBlendMode: BlendMode.hardLight,
         gradient: RadialGradient(
           radius: 1.5,
-          colors: [
-            Colors.white,
-            Colors.blue,
-            Colors.transparent,
-          ],
+          colors: [Colors.white, Colors.blue, Colors.transparent],
           stops: [0.02, 0.2, 1.0],
         ),
       ),

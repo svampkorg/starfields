@@ -13,9 +13,7 @@ void main() {
   });
 
   testWidgets('explode mode renders and stops ticking once all stars are gone', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(home: StarfieldSimulationWidget(numberOfStars: 50, explode: true)),
-    );
+    await tester.pumpWidget(const MaterialApp(home: StarfieldSimulationWidget(numberOfStars: 50, explode: true)));
     for (var i = 0; i < 30; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
