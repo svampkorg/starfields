@@ -1,18 +1,12 @@
 import 'package:flutter/material.dart';
 
 class ScalingGradientWidget extends StatelessWidget {
-  const ScalingGradientWidget({
-    Key? key,
-  }) : super(key: key);
+  const ScalingGradientWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
-    Size windowSize = MediaQuery.of(context).size;
-    //print("windowSize.height: ${windowSize.height}");
-    return Container(
-      height: windowSize.height,
-      width: windowSize.width,
-      decoration: const BoxDecoration(
+    return const DecoratedBox(
+      decoration: BoxDecoration(
         backgroundBlendMode: BlendMode.hardLight,
         gradient: RadialGradient(
           radius: 1.5,

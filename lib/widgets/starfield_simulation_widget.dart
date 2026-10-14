@@ -1,146 +1,112 @@
-import 'dart:async';
-
 import 'dart:math';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:starfields/starfield/starfield.dart';
 
 class StarfieldSimulationWidget extends StatefulWidget {
   final int numberOfStars;
+
+  /// Duration in milliseconds of one step of the original stepped simulation.
+  /// Higher is slower.
   final int speed;
   final bool explode;
-  const StarfieldSimulationWidget({Key? key, required this.numberOfStars, this.speed = 8, this.explode = false}) : super(key: key);
+  const StarfieldSimulationWidget({super.key, required this.numberOfStars, this.speed = 8, this.explode = false});
 
   @override
   State<StarfieldSimulationWidget> createState() => _StarfieldSimulationWidgetState();
 }
 
 class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> with SingleTickerProviderStateMixin {
-  final List<Star> _stars = [];
-  late AnimationController starAnimation;
-  late AnimationController? explosionAnimation;
-  late Size windowSize;
-  bool isInit = false;
-  late Timer t;
+  late final Ticker _ticker;
+  final ValueNotifier<double> _time = ValueNotifier(0);
+  final ui.Image _sprite = StarsPainter.createSprite();
+  late StarsPainter _painter;
 
   @override
   void initState() {
     super.initState();
-    if (!isInit) {
-      t = Timer(Duration(milliseconds: widget.speed), _updateStars);
-      //_initTimer(context);
-      switch (widget.explode) {
-        case false:
-          starAnimation = AnimationController(vsync: this, duration: const Duration(seconds: 1));
-          starAnimation.repeat();
-          break;
-        case true:
-          _initExplosion();
-          starAnimation = AnimationController(vsync: this, duration: const Duration(seconds: 1));
-          break;
-      }
-      isInit = true;
-    }
+    _createPainter();
+    _ticker = createTicker(_tick)..start();
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    windowSize = MediaQuery.of(context).size;
-    //t = Timer(Duration(milliseconds: widget.speed), _updateStars);
-  }
-
-  //void _initTimer(BuildContext context) {
-  //  double durationMicroSeconds = 3000; //* liveGameData.time as double;
-  //  if (durationMicroSeconds <= 0) durationMicroSeconds = 12000;
-  //  if (t.isActive) t.cancel();
-  //  t = Timer(
-  //      Duration(microseconds: durationMicroSeconds.toInt()), _updateStars);
-  //}
-
-  void _initExplosion() {
-    while (_stars.length <= widget.numberOfStars) {
-      _stars.add(Star(windowXSize: windowSize.width, windowYSize: windowSize.height, startCenter: true));
+  void didUpdateWidget(StarfieldSimulationWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.numberOfStars != widget.numberOfStars ||
+        oldWidget.speed != widget.speed ||
+        oldWidget.explode != widget.explode) {
+      _createPainter();
+      _ticker
+        ..stop()
+        ..start();
     }
   }
 
-  void _updateStars() {
-    if (!isInit || !mounted) return;
-    if (_stars.length < widget.numberOfStars && !widget.explode) {
-      _stars.add(Star(windowXSize: windowSize.width, windowYSize: windowSize.height));
-    }
-    for (int index = 0; index < _stars.length; index++) {
-      _stars[index].move();
-    }
-    t = Timer(Duration(milliseconds: widget.speed), _updateStars);
+  void _createPainter() {
+    final starfield = Starfield(
+      count: widget.numberOfStars,
+      tickSeconds: widget.speed / 1000,
+      respawn: !widget.explode,
+    );
+    _painter = StarsPainter(starfield: starfield, sprite: _sprite, repaint: _time);
+  }
+
+  void _tick(Duration elapsed) {
+    final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+    final starfield = _painter.starfield;
+    starfield.update(seconds);
+    _time.value = seconds;
+    if (starfield.isFinished) _ticker.stop();
   }
 
   @override
   void dispose() {
-    _stars.clear();
-    if (t.isActive) {
-      t.cancel();
-    }
-    starAnimation.stop();
-    starAnimation.dispose();
+    _ticker.dispose();
+    _time.dispose();
+    _sprite.dispose();
     super.dispose();
-  }
-
-  void stopStars() {
-    if (t.isActive) {
-      t.cancel();
-    } else {
-      t = Timer(Duration(milliseconds: widget.speed), _updateStars);
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
+      fit: StackFit.expand,
       children: [
-        CustomPaint(
-          isComplex: true,
-          size: windowSize,
-          painter: StarsPainter(stars: _stars, listenable: starAnimation, screenSize: windowSize),
-        ),
+        RepaintBoundary(child: CustomPaint(painter: _painter)),
         if (widget.explode)
           TweenAnimationBuilder<double>(
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeOutSine,
             tween: Tween<double>(begin: 1.0, end: 0.0),
-            onEnd: () => starAnimation.repeat(),
             builder:
-                (context, value, child) => Center(
-                  child: Container(
-                    height: windowSize.height,
-                    width: windowSize.width,
-                    decoration: BoxDecoration(
-                      backgroundBlendMode: BlendMode.hardLight,
-                      gradient: RadialGradient(
-                        radius: value * 2.2,
-                        colors: const [Colors.white, Colors.blue, Colors.transparent],
-                        stops: const [0.02, 0.2, 1.0],
-                      ),
+                (context, value, child) => DecoratedBox(
+                  decoration: BoxDecoration(
+                    backgroundBlendMode: BlendMode.hardLight,
+                    gradient: RadialGradient(
+                      radius: value * 2.2,
+                      colors: const [Colors.white, Colors.blue, Colors.transparent],
+                      stops: const [0.02, 0.2, 1.0],
                     ),
                   ),
                 ),
           ),
-        Center(
-          child: Container(
-            height: windowSize.height,
-            width: windowSize.width,
-            decoration: BoxDecoration(
-              backgroundBlendMode: BlendMode.hue,
-              gradient: RadialGradient(
-                radius: 0.7,
-                colors: [
-                  Colors.white,
-                  Colors.cyanAccent,
-                  Colors.lightBlue,
-                  Colors.blueAccent,
-                  Colors.deepPurple,
-                  Colors.deepPurple.withValues(alpha: 0.4),
-                ],
-                stops: const [0.00, 0.3, 0.5, 0.6, 0.8, 1.0],
-              ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            backgroundBlendMode: BlendMode.hue,
+            gradient: RadialGradient(
+              radius: 0.7,
+              colors: [
+                Colors.white,
+                Colors.cyanAccent,
+                Colors.lightBlue,
+                Colors.blueAccent,
+                Colors.deepPurple,
+                Colors.deepPurple.withValues(alpha: 0.4),
+              ],
+              stops: const [0.00, 0.3, 0.5, 0.6, 0.8, 1.0],
             ),
           ),
         ),
@@ -149,231 +115,130 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   }
 }
 
+/// Paints all star glows with a single atlas draw and all tails with a single
+/// vertices draw, writing straight into reusable typed buffers.
 class StarsPainter extends CustomPainter {
-  AnimationController listenable;
-  List<Star> stars;
-  final RadialGradient mainGradient = const RadialGradient(
-    colors: [Colors.white, Colors.redAccent, Colors.transparent],
-    stops: [0.0, 0.2, 0.8],
-  );
-  final RadialGradient tailGradient = const RadialGradient(
-    colors: [
-      // Colors.transparent,
-      Colors.white,
-      Colors.redAccent,
-      Colors.transparent,
-    ],
-    stops: [
-      0.0,
-      // 0.3,
-      0.6,
-      1.0,
-    ],
-  );
-  Size screenSize;
-  StarsPainter({required this.listenable, required this.stars, required this.screenSize}) : super(repaint: listenable);
+  final Starfield starfield;
+  final ui.Image sprite;
+
+  /// Radius in pixels of the pre-rendered glow sprite.
+  static const double spriteRadius = 128;
+
+  /// Vertices per tail: four triangles, three color stops along the tail.
+  static const int _tailVertices = 12;
+
+  static final Int32List _tailColorPattern = () {
+    const white = 0xFFFFFFFF, red = 0xFFFF5252, clear = 0x00000000; // Colors.redAccent
+    return Int32List.fromList([white, white, red, white, red, red, red, red, clear, red, clear, clear]);
+  }();
+
+  final Float32List _transforms;
+  final Float32List _rects;
+  final Float32List _tailPositions;
+  final Int32List _tailColors;
+  final Paint _spritePaint = Paint()..filterQuality = FilterQuality.low;
+  final Paint _tailPaint = Paint();
+
+  StarsPainter({required this.starfield, required this.sprite, super.repaint})
+    : _transforms = Float32List(starfield.count * 4),
+      _rects = Float32List(starfield.count * 4),
+      _tailPositions = Float32List(starfield.count * _tailVertices * 2),
+      _tailColors = Int32List(starfield.count * _tailVertices) {
+    for (var i = 0; i < starfield.count; i++) {
+      _rects.setAll(i * 4, const [0, 0, spriteRadius * 2, spriteRadius * 2]);
+      _tailColors.setAll(i * _tailVertices, _tailColorPattern);
+    }
+  }
+
+  /// Renders the star glow once, so each star can be drawn as a scaled copy.
+  static ui.Image createSprite() {
+    const center = Offset(spriteRadius, spriteRadius);
+    const gradient = RadialGradient(
+      colors: [Colors.white, Colors.redAccent, Colors.transparent],
+      stops: [0.0, 0.2, 0.8],
+    );
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder).drawCircle(
+      center,
+      spriteRadius,
+      Paint()..shader = gradient.createShader(Rect.fromCircle(center: center, radius: spriteRadius)),
+    );
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(spriteRadius.toInt() * 2, spriteRadius.toInt() * 2);
+    picture.dispose();
+    return image;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    Paint starPaint, tailPaint;
+    final count = starfield.visibleCount;
+    if (count == 0) return;
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
 
-    Pos screenCenter = Pos(screenSize.width / 2, screenSize.height / 2);
-    double screenWidth = screenSize.width;
-    double screenHeight = screenSize.height;
+    for (var i = 0; i < count; i++) {
+      final px = centerX + starfield.x[i] * size.width;
+      final py = centerY + starfield.y[i] * size.height;
+      final starSize = starfield.size[i];
 
-    Pos starPosition;
-    double starSize;
+      // Glow: radius starSize * 5, sprite centered on the star.
+      final scale = starSize * 5 / spriteRadius;
+      final t = i * 4;
+      _transforms[t] = scale;
+      _transforms[t + 1] = 0;
+      _transforms[t + 2] = px - scale * spriteRadius;
+      _transforms[t + 3] = py - scale * spriteRadius;
 
-    double widthDiff;
-    double heightDiff;
-
-    double tailXOffset;
-    double tailYOffset;
-
-    double tailOffset;
-
-    double direction;
-
-    for (int index = 0; index < stars.length; index++) {
-      starPosition = Pos(stars[index].posX, stars[index].posY);
-      starSize = stars[index].size;
-
-      widthDiff = starPosition.x - screenCenter.x;
-      heightDiff = starPosition.y - screenCenter.y;
-
-      direction = Offset(starPosition.x, starPosition.y).direction;
-
-      // tailXOffset = 1 / (widthDiff / heightDiff);
-      // tailYOffset = 1 / (heightDiff / widthDiff);
-
-      tailOffset = 1 / (widthDiff / heightDiff);
-
-      starPaint =
-          Paint()
-            ..style = PaintingStyle.fill
-            //..blendMode = BlendMode.hardLight
-            ..shader = mainGradient.createShader(
-              Rect.fromCircle(center: Offset(screenWidth * starPosition.x, screenHeight * starPosition.y), radius: starSize * 5),
-            );
-
-      tailPaint =
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = starSize
-            ..strokeCap = StrokeCap.round
-            //..blendMode = BlendMode.hardLight
-            ..shader = tailGradient.createShader(
-              Rect.fromCircle(center: Offset(screenWidth * starPosition.x, screenHeight * starPosition.y), radius: starSize * 10 + 20),
-            );
-
-      Path tailPath = Path();
-      tailPath.moveTo(
-        screenWidth * starPosition.x, // + starSize * tailOffset,
-        screenHeight * starPosition.y, // + starSize * tailOffset,
-      );
-      tailPath.lineTo(
-        screenWidth * starPosition.x, // - starSize * tailOffset,
-        screenHeight * starPosition.y, // - starSize * tailOffset,
-      );
-      tailPath.lineTo(screenCenter.x, screenCenter.y);
-      //tailPath.close();
-
-      canvas.drawCircle(Offset(screenWidth * starPosition.x, screenHeight * starPosition.y), starSize * 5, starPaint);
-      canvas.drawPath(tailPath, tailPaint);
+      // Tail: a strip of width starSize from the star towards the center,
+      // fading white -> red at 60% -> transparent.
+      var dx = centerX - px;
+      var dy = centerY - py;
+      final distance = sqrt(dx * dx + dy * dy);
+      var length = 0.0, nx = 0.0, ny = 0.0;
+      if (distance > 0.5) {
+        dx /= distance;
+        dy /= distance;
+        length = min(starSize * 10 + 20, distance);
+        nx = -dy * starSize / 2;
+        ny = dx * starSize / 2;
+      }
+      final midX = px + dx * length * 0.6, midY = py + dy * length * 0.6;
+      final endX = px + dx * length, endY = py + dy * length;
+      final v = i * _tailVertices * 2;
+      _setTriangle(v, px + nx, py + ny, px - nx, py - ny, midX + nx, midY + ny);
+      _setTriangle(v + 6, px - nx, py - ny, midX - nx, midY - ny, midX + nx, midY + ny);
+      _setTriangle(v + 12, midX + nx, midY + ny, midX - nx, midY - ny, endX + nx, endY + ny);
+      _setTriangle(v + 18, midX - nx, midY - ny, endX - nx, endY - ny, endX + nx, endY + ny);
     }
+
+    canvas.drawRawAtlas(
+      sprite,
+      Float32List.sublistView(_transforms, 0, count * 4),
+      Float32List.sublistView(_rects, 0, count * 4),
+      null,
+      null,
+      null,
+      _spritePaint,
+    );
+    final tails = ui.Vertices.raw(
+      ui.VertexMode.triangles,
+      Float32List.sublistView(_tailPositions, 0, count * _tailVertices * 2),
+      colors: Int32List.sublistView(_tailColors, 0, count * _tailVertices),
+    );
+    // BlendMode.dst: use the vertex colors as they are.
+    canvas.drawVertices(tails, BlendMode.dst, _tailPaint);
+    tails.dispose();
+  }
+
+  void _setTriangle(int offset, double x0, double y0, double x1, double y1, double x2, double y2) {
+    _tailPositions[offset] = x0;
+    _tailPositions[offset + 1] = y0;
+    _tailPositions[offset + 2] = x1;
+    _tailPositions[offset + 3] = y1;
+    _tailPositions[offset + 4] = x2;
+    _tailPositions[offset + 5] = y2;
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return false;
-  }
-}
-
-class Pos {
-  double x;
-  double y;
-
-  Pos(this.x, this.y);
-}
-
-enum Direction { topRight, topLeft, bottomLeft, bottomRight }
-
-class Star {
-  double velocity;
-  double luminance;
-  double size;
-
-  int speed;
-
-  late Direction direction;
-
-  double posX, posY;
-
-  double centerX = 0.5, centerY = 0.5;
-
-  double? normalizedDirection;
-
-  bool startCenter;
-
-  static final rng = Random();
-
-  final double windowXSize;
-  final double windowYSize;
-
-  Star({required this.windowXSize, required this.windowYSize, this.startCenter = false})
-    : velocity = rng.nextDouble(),
-      size = 0.1,
-      speed = rng.nextInt(10) + 1,
-      luminance = rng.nextDouble() * 0.5 + 0.5,
-      posX = rng.nextDouble(),
-      posY = rng.nextDouble();
-
-  void move() {
-    double distanceFromCenterX = centerX - posX;
-    double distanceFromCenterY = centerY - posY;
-    double speedFactor = 0.004;
-    //If distance from originX is negative, star is in right part of screen, else left part of screen.
-    //If distance from originY is negative, star is in bottom part of screen, else top part of screen.
-    distanceFromCenterX.isNegative
-        ? posX +=
-            -distanceFromCenterX *
-            speed *
-            speedFactor //is right side of origin
-        : posX -= distanceFromCenterX * speed * speedFactor; //is left side of origin
-    distanceFromCenterY.isNegative
-        ? posY +=
-            -distanceFromCenterY *
-            speed *
-            speedFactor //is bottom side of origin
-        : posY -= distanceFromCenterY * speed * speedFactor; //is top side of origin
-
-    _setSize();
-    _checkBounds();
-  }
-
-  void _setSize() {
-    double growThreshold = 0.015;
-
-    double distanceFromCenterX = centerX - posX;
-    double distanceFromCenterY = centerY - posY;
-    if (distanceFromCenterX > growThreshold ||
-        distanceFromCenterX < -growThreshold ||
-        distanceFromCenterY > growThreshold ||
-        distanceFromCenterY < -growThreshold) {
-      //"lookup table" for star growth depending on speed/distance
-      switch (speed) {
-        case 1:
-          size += 0.001;
-          break;
-        case 2:
-          size += 0.003;
-          break;
-        case 3:
-          size += 0.006;
-          break;
-        case 4:
-          size += 0.016;
-          break;
-        case 5:
-          size += 0.030;
-          break;
-        case 6:
-          size += 0.050;
-          break;
-        case 7:
-          size += 0.070;
-          break;
-        case 8:
-          size += 0.090;
-          break;
-        case 9:
-          size += 0.120;
-          break;
-        case 10:
-          size += 0.150;
-          break;
-      }
-    }
-  }
-
-  void _checkBounds() {
-    //if outside of window
-    if (posX > 1.2 || posX < -0.2) _resetStar();
-    if (posY > 1.2 || posY < -0.2) _resetStar();
-  }
-
-  void _resetStar() {
-    if (startCenter) return;
-    //random bool to determin initial offset from center on either axle for reasons
-    bool addXOffst = rng.nextBool();
-    bool addYOffset = rng.nextBool();
-    //the offset from center when repositioning, again.. reasons
-    double xOffset = rng.nextDouble() * 0.0001; //rng.nextInt(20) + 10;
-    double yOffset = rng.nextDouble() * 0.0001; //rng.nextInt(20) + 10;
-    posX = centerX;
-    posY = centerY;
-    addXOffst ? posX += xOffset : posX -= xOffset;
-    addYOffset ? posY += yOffset : posY -= yOffset;
-
-    size = 0.1;
-  }
+  bool shouldRepaint(StarsPainter oldDelegate) => oldDelegate.starfield != starfield || oldDelegate.sprite != sprite;
 }

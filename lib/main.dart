@@ -30,13 +30,12 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateMixin {
-
+class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(children: [StarfieldSimulationWidget(numberOfStars: 200), ScalingGradientWidget()]),
+      body: Stack(fit: StackFit.expand, children: [StarfieldSimulationWidget(numberOfStars: 200), ScalingGradientWidget()]),
     );
   }
 }
