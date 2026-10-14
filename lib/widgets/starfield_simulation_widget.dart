@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:starfields/renderers/batched_stars_painter.dart';
+import 'package:starfields/renderers/hyperspace_painter.dart';
 import 'package:starfields/renderers/procedural_stars_painter.dart';
 import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/renderers/styled_stars_painter.dart';
@@ -20,13 +21,12 @@ enum StarfieldRenderer {
   /// Full-screen procedural shader on a log-polar grid: no star data at all.
   procedural('Procedural'),
 
-  /// Classic constant-cost hyperspace shader (not implemented yet).
+  /// Classic light-speed streaks; constant cost per pixel at any star count.
+  /// Explode = jump: streaks stretch and speed up.
   hyperspace('Hyperspace');
 
   const StarfieldRenderer(this.label);
   final String label;
-
-  bool get isAvailable => this != hyperspace;
 
   /// Renderers that draw the CPU simulation's stars. The others compute
   /// everything in a shader, so the CPU simulation pauses while they are on.
@@ -126,8 +126,10 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
         shader: _shader = StarShaders.procedural.fragmentShader(),
         time: _time,
       ),
-      StarfieldRenderer.hyperspace => throw UnimplementedError(
-        '${widget.renderer.label} renderer is not implemented yet',
+      StarfieldRenderer.hyperspace => HyperspacePainter(
+        starfield: _starfield,
+        shader: _shader = StarShaders.hyperspace.fragmentShader(),
+        time: _time,
       ),
     };
   }
@@ -151,13 +153,17 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
     } else {
       // Shader-only renderers: no CPU simulation; the stats show what the
       // shader draws.
-      finished = !starfield.respawn && _now - starfield.startTime > _shaderExplosionSeconds;
+      // A procedural explosion ends; a hyperspace jump lasts until restored.
+      finished =
+          widget.renderer == StarfieldRenderer.procedural &&
+          !starfield.respawn &&
+          _now - starfield.startTime > _shaderExplosionSeconds;
       final painter = _painter;
       visible = finished
           ? 0
           : painter is ProceduralStarsPainter
           ? painter.estimateStars().round()
-          : starfield.count;
+          : HyperspacePainter.drawnStars(starfield.count);
     }
     if (visible != _reportedVisibleCount) {
       _reportedVisibleCount = visible;

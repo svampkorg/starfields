@@ -13,6 +13,9 @@ class StarShaders {
   /// Full-screen program of the "Procedural" renderer.
   static late final ui.FragmentProgram procedural;
 
+  /// Full-screen program of the "Hyperspace" renderer.
+  static late final ui.FragmentProgram hyperspace;
+
   static const int atlasWidth = 256;
   static const int glowSize = 256;
   static const int tailBands = 32;
@@ -34,6 +37,7 @@ class StarShaders {
     picture.dispose();
     shader.dispose();
     procedural = await ui.FragmentProgram.fromAsset('shaders/procedural_stars.frag');
+    hyperspace = await ui.FragmentProgram.fromAsset('shaders/hyperspace.frag');
     _loaded = true;
   }
 }

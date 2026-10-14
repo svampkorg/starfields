@@ -128,15 +128,7 @@ class StarfieldControlBar extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               SegmentedButton<StarfieldRenderer>(
-                segments: [
-                  for (final r in StarfieldRenderer.values)
-                    ButtonSegment(
-                      value: r,
-                      label: Text(r.label),
-                      enabled: r.isAvailable,
-                      tooltip: r.isAvailable ? null : 'Coming in Phase 2',
-                    ),
-                ],
+                segments: [for (final r in StarfieldRenderer.values) ButtonSegment(value: r, label: Text(r.label))],
                 selected: {renderer},
                 showSelectedIcon: false,
                 onSelectionChanged: (selection) => onRendererChanged(selection.single),
@@ -144,7 +136,13 @@ class StarfieldControlBar extends StatelessWidget {
               FilledButton.tonalIcon(
                 onPressed: onExplodeToggled,
                 icon: Icon(exploded ? Icons.restart_alt : Icons.flare),
-                label: Text(exploded ? 'Restore' : 'Explode'),
+                // In hyperspace an explosion is a jump to light speed.
+                label: Text(switch ((renderer, exploded)) {
+                  (StarfieldRenderer.hyperspace, false) => 'Jump',
+                  (StarfieldRenderer.hyperspace, true) => 'Drop out',
+                  (_, false) => 'Explode',
+                  (_, true) => 'Restore',
+                }),
               ),
             ],
           ),

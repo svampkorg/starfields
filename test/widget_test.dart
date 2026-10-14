@@ -66,12 +66,24 @@ void main() {
       expect(find.text('stars 200 / 200'), findsOneWidget);
     });
 
-    testWidgets('unimplemented renderers are not selectable', (tester) async {
+    testWidgets('hyperspace renders, and explode becomes a jump that keeps running', (tester) async {
       await tester.pumpWidget(const MyApp());
       await tester.tap(find.text('Hyperspace'));
+      await pumpFrames(tester, 3);
+      expect(tester.takeException(), isNull);
+      expect(find.text('stars 200 / 200'), findsOneWidget);
+
+      await tester.tap(find.text('Jump'));
       await pumpFrames(tester, 2);
-      final button = tester.widget<SegmentedButton<StarfieldRenderer>>(find.byType(SegmentedButton<StarfieldRenderer>));
-      expect(button.selected, {StarfieldRenderer.batched});
+      expect(find.text('Drop out'), findsOneWidget);
+      // Unlike an explosion, a jump never runs out of stars.
+      await tester.pump(const Duration(seconds: 30));
+      await pumpFrames(tester, 2);
+      expect(tester.binding.hasScheduledFrame, isTrue);
+
+      await tester.tap(find.text('Drop out'));
+      await pumpFrames(tester, 2);
+      expect(find.text('Jump'), findsOneWidget);
     });
 
     testWidgets('switching to the styled renderer keeps the stars', (tester) async {
