@@ -14,7 +14,8 @@ import 'dart:typed_data';
 ///
 /// An explosion ([explode]) stops spawning, absorbs the stars still near the
 /// center into the core, and after [dropOffSeconds] bursts all absorbed stars
-/// out of the core at once; then spawning resumes.
+/// out of the core at once; afterwards each burst star is reborn at a random
+/// point of its own spawn period, so spawning comes back gradually.
 ///
 /// Positions are offsets from the screen center in normalized units (the screen
 /// spans -0.5..0.5 on both axes).
@@ -42,6 +43,10 @@ class Starfield {
 
   /// Time from the start of an explosion to the burst.
   static const double dropOffSeconds = 1.8;
+
+  /// Average rho a star travels during one life: ln(0.7) - (ln(1e-4) - 0.5),
+  /// so a star with rate k is born about every _lifeRho / k seconds.
+  static const double _lifeRho = 9.35;
 
   /// Burst stars start this far from the center (normalized units): just
   /// outside the core, so the burst is visible at once.
@@ -159,6 +164,13 @@ class Starfield {
         if (explosion != null && exitTime >= explosion && exitTime < explosion + dropOffSeconds) {
           // Spawning has stopped: this star waits for the burst.
           _burst(i, explosion + dropOffSeconds);
+        } else if (explosion != null && _spawnTime[i] == explosion + dropOffSeconds) {
+          // A burst star. They all left the core together, so respawning each
+          // as it leaves would send them out again as a second wave. Instead
+          // wait a random part of its natural spawn period: the random phase
+          // a star has in a steady starfield. Fast stars come back sooner and
+          // more often, exactly as in steady state, so nothing overshoots.
+          _respawn(i, exitTime + _random.nextDouble() * _lifeRho / _rate[i]);
         } else if (time - exitTime > _maxCatchUpSeconds) {
           // Long pause (app in background, a shader-only renderer active):
           // skip the lost lives and restart at a random point of a new life,

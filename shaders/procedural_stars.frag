@@ -39,6 +39,8 @@ const int kLayers = 10;
 const int kMaxPerCell = 4;
 const float kRowPeriod = 4096.0;  // row hash period; the CPU wraps the scroll offset to match
 const float kTwoPi = 6.28318530718;
+const float kBirthRho = -9.7;        // typical rho at birth (~1e-4 from the center)
+const float kComebackSeconds = 2.0;  // post-burst birth ramp
 
 const vec4 kWhite = vec4(1.0, 1.0, 1.0, 1.0);
 const vec4 kRed = vec4(1.0, 0.3216, 0.3216, 1.0);  // Colors.redAccent
@@ -125,7 +127,12 @@ void main() {
                 growLimit = sinceBurst;
               } else if (atBurst > 0.03) {
                 expected = 0.0;
-              }  // else: spawned after the burst, steady
+              } else {
+                // Spawned after the burst: births come back gradually, like
+                // the CPU Starfield (burst stars are reborn as they leave).
+                float bornAfterBurst = sinceBurst - (starRho - kBirthRho) / motion.x;
+                expected *= clamp(bornAfterBurst / kComebackSeconds, 0.0, 1.0);
+              }
             }
           }
           if (h.x >= expected - float(m)) continue;  // fractional chance for the last slot
