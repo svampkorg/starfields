@@ -16,10 +16,10 @@ import 'dart:typed_data';
 /// spans -0.5..0.5 on both axes).
 class Starfield {
   /// Speed factor per tick of the original stepped simulation.
-  static const double _speedFactor = 0.004;
+  static const double speedFactor = 0.004;
 
   /// Size growth per tick, indexed by `speed - 1`.
-  static const List<double> _growthPerTick = [0.001, 0.003, 0.006, 0.016, 0.030, 0.050, 0.070, 0.090, 0.120, 0.150];
+  static const List<double> growthPerTick = [0.001, 0.003, 0.006, 0.016, 0.030, 0.050, 0.070, 0.090, 0.120, 0.150];
 
   /// Size of a newly spawned star.
   static const double initialSize = 0.1;
@@ -47,6 +47,9 @@ class Starfield {
   /// When false, every star is spawned at once and never respawned.
   final bool respawn;
 
+  /// Simulation time at which this starfield was created.
+  final double startTime;
+
   final Random _random;
 
   // Per-star constants.
@@ -72,7 +75,7 @@ class Starfield {
 
   /// Creates [count] stars. With [respawn] they appear one per tick from
   /// [startTime], like the original start-up; otherwise all at once.
-  Starfield({required int count, this.tickSeconds = 0.008, this.respawn = true, double startTime = 0, Random? random})
+  Starfield({required int count, this.tickSeconds = 0.008, this.respawn = true, this.startTime = 0, Random? random})
     : _random = random ?? Random() {
     _ensureCapacity(count);
     for (var i = 0; i < count; i++) {
@@ -94,8 +97,8 @@ class Starfield {
 
   void _initStar(int i, double spawnTime) {
     final speed = _random.nextInt(10) + 1;
-    _rate[i] = log(1 + speed * _speedFactor) / tickSeconds;
-    _growthPerSecond[i] = _growthPerTick[speed - 1] / tickSeconds;
+    _rate[i] = log(1 + speed * speedFactor) / tickSeconds;
+    _growthPerSecond[i] = growthPerTick[speed - 1] / tickSeconds;
     // The first life starts anywhere on screen; later ones at the center.
     _startLife(i, time: spawnTime, originX: _random.nextDouble() - 0.5, originY: _random.nextDouble() - 0.5);
   }

@@ -8,6 +8,8 @@
 //   INSTANT=true       spawn all stars at once (via resize) instead of one per
 //                      8 ms like the original start-up; for large star counts
 //   RENDERER=batched   a StarfieldRenderer name
+//   EXPLODE=true       explosion instead of the steady starfield
+//   WARMUP_MS=2000     wait before measuring (default: spawn time + 2 s)
 //   SHOT=name.png      also save a snapshot of the last frame into the
 //                      (sandboxed) app's temp dir
 import 'dart:io';
@@ -24,6 +26,7 @@ const int stars = int.fromEnvironment('STARS', defaultValue: 200);
 const int measureSeconds = int.fromEnvironment('SECONDS', defaultValue: 8);
 const String shotPath = String.fromEnvironment('SHOT');
 const bool instant = bool.fromEnvironment('INSTANT');
+const bool explode = bool.fromEnvironment('EXPLODE');
 final StarfieldRenderer renderer = StarfieldRenderer.values.byName(
   const String.fromEnvironment('RENDERER', defaultValue: 'batched'),
 );
@@ -47,7 +50,11 @@ Future<void> main() async {
   );
 
   // Stars are spawned one per 8 ms simulation step; let them all appear first.
-  final warmUp = Duration(milliseconds: (instant ? 0 : stars * 8) + 2000);
+  final warmUp = Duration(
+    milliseconds: const int.fromEnvironment('WARMUP_MS', defaultValue: -1) >= 0
+        ? const int.fromEnvironment('WARMUP_MS')
+        : (instant ? 0 : stars * 8) + 2000,
+  );
   final timings = <FrameTiming>[];
   void collect(List<FrameTiming> t) => timings.addAll(t);
 
@@ -63,6 +70,12 @@ Future<void> main() async {
 }
 
 void _report(List<FrameTiming> timings) {
+  if (timings.isEmpty) {
+    // E.g. an explosion that ended before measuring: nothing was rendered.
+    // ignore: avoid_print
+    print('BENCH ${renderer.name} stars=$stars frames=0 (nothing rendered while measuring)');
+    return;
+  }
   double ms(Duration d) => d.inMicroseconds / 1000;
   String stats(List<double> v) {
     v.sort();
@@ -113,5 +126,6 @@ class _BenchStarfieldState extends State<_BenchStarfield> {
   }
 
   @override
-  Widget build(BuildContext context) => StarfieldSimulationWidget(numberOfStars: _count, renderer: renderer);
+  Widget build(BuildContext context) =>
+      StarfieldSimulationWidget(numberOfStars: _count, renderer: renderer, explode: explode);
 }

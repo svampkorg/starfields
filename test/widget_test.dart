@@ -68,7 +68,7 @@ void main() {
 
     testWidgets('unimplemented renderers are not selectable', (tester) async {
       await tester.pumpWidget(const MyApp());
-      await tester.tap(find.text('Procedural'));
+      await tester.tap(find.text('Hyperspace'));
       await pumpFrames(tester, 2);
       final button = tester.widget<SegmentedButton<StarfieldRenderer>>(find.byType(SegmentedButton<StarfieldRenderer>));
       expect(button.selected, {StarfieldRenderer.batched});
@@ -85,6 +85,23 @@ void main() {
       expect(button.selected, {StarfieldRenderer.styled});
       expect(find.text('stars 200 / 200'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('procedural renderer pauses the simulation and reports what it draws', (tester) async {
+      await tester.pumpWidget(const MyApp());
+      await pumpFrames(tester, 150);
+
+      await tester.tap(find.text('Procedural'));
+      await pumpFrames(tester, 3);
+      expect(tester.takeException(), isNull);
+      final button = tester.widget<SegmentedButton<StarfieldRenderer>>(find.byType(SegmentedButton<StarfieldRenderer>));
+      expect(button.selected, {StarfieldRenderer.procedural});
+      expect(find.text('stars 200 / 200'), findsOneWidget);
+
+      // Back to the CPU renderers: the same starfield carries on.
+      await tester.tap(find.text('Batched'));
+      await pumpFrames(tester, 3);
+      expect(find.text('stars 200 / 200'), findsOneWidget);
     });
 
     testWidgets('H hides and shows the controls', (tester) async {

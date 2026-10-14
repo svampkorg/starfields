@@ -10,6 +10,9 @@ class StarShaders {
   /// painted once by `shaders/styled_atlas.frag`. Layout documented there.
   static late final ui.Image styledAtlas;
 
+  /// Full-screen program of the "Procedural" renderer.
+  static late final ui.FragmentProgram procedural;
+
   static const int atlasWidth = 256;
   static const int glowSize = 256;
   static const int tailBands = 32;
@@ -30,6 +33,7 @@ class StarShaders {
     styledAtlas = await picture.toImage(atlasWidth, atlasHeight);
     picture.dispose();
     shader.dispose();
+    procedural = await ui.FragmentProgram.fromAsset('shaders/procedural_stars.frag');
     _loaded = true;
   }
 }

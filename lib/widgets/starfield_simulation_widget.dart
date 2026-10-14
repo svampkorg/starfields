@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:starfields/renderers/batched_stars_painter.dart';
+import 'package:starfields/renderers/procedural_stars_painter.dart';
 import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/renderers/styled_stars_painter.dart';
 import 'package:starfields/starfield/starfield.dart';
@@ -16,7 +17,7 @@ enum StarfieldRenderer {
   /// shader-generated atlas, in one draw call, with antialiased tails.
   styled('Styled'),
 
-  /// Full-screen procedural shader on a log-polar grid (not implemented yet).
+  /// Full-screen procedural shader on a log-polar grid: no star data at all.
   procedural('Procedural'),
 
   /// Classic constant-cost hyperspace shader (not implemented yet).
@@ -25,7 +26,11 @@ enum StarfieldRenderer {
   const StarfieldRenderer(this.label);
   final String label;
 
-  bool get isAvailable => this == batched || this == styled;
+  bool get isAvailable => this != hyperspace;
+
+  /// Renderers that draw the CPU simulation's stars. The others compute
+  /// everything in a shader, so the CPU simulation pauses while they are on.
+  bool get usesSimulation => this == batched || this == styled;
 }
 
 class StarfieldSimulationWidget extends StatefulWidget {
@@ -59,6 +64,11 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   final ui.Image _sprite = BatchedStarsPainter.createSprite();
   late Starfield _starfield;
   late CustomPainter _painter;
+  ui.FragmentShader? _shader;
+
+  /// A shader-only explosion is over after this long: the slowest stars have
+  /// left the screen.
+  static const double _shaderExplosionSeconds = 15;
 
   /// Simulation clock in seconds. Keeps counting across ticker restarts (the
   /// ticker stops once an explosion is over), so spawn times stay valid.
@@ -102,6 +112,8 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   }
 
   void _createPainter() {
+    _shader?.dispose();
+    _shader = null;
     _painter = switch (widget.renderer) {
       StarfieldRenderer.batched => BatchedStarsPainter(starfield: _starfield, sprite: _sprite, repaint: _time),
       StarfieldRenderer.styled => StyledStarsPainter(
@@ -109,7 +121,12 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
         atlas: StarShaders.styledAtlas,
         repaint: _time,
       ),
-      StarfieldRenderer.procedural || StarfieldRenderer.hyperspace => throw UnimplementedError(
+      StarfieldRenderer.procedural => ProceduralStarsPainter(
+        starfield: _starfield,
+        shader: _shader = StarShaders.procedural.fragmentShader(),
+        time: _time,
+      ),
+      StarfieldRenderer.hyperspace => throw UnimplementedError(
         '${widget.renderer.label} renderer is not implemented yet',
       ),
     };
@@ -124,13 +141,29 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   void _tick(Duration elapsed) {
     _now = _tickerStart + elapsed.inMicroseconds / Duration.microsecondsPerSecond;
     final starfield = _starfield;
-    starfield.update(_now);
     _time.value = _now;
-    if (starfield.visibleCount != _reportedVisibleCount) {
-      _reportedVisibleCount = starfield.visibleCount;
-      widget.onVisibleCountChanged?.call(_reportedVisibleCount);
+    final int visible;
+    final bool finished;
+    if (widget.renderer.usesSimulation) {
+      starfield.update(_now);
+      visible = starfield.visibleCount;
+      finished = starfield.isFinished;
+    } else {
+      // Shader-only renderers: no CPU simulation; the stats show what the
+      // shader draws.
+      finished = !starfield.respawn && _now - starfield.startTime > _shaderExplosionSeconds;
+      final painter = _painter;
+      visible = finished
+          ? 0
+          : painter is ProceduralStarsPainter
+          ? painter.estimateStars().round()
+          : starfield.count;
     }
-    if (starfield.isFinished) _ticker.stop();
+    if (visible != _reportedVisibleCount) {
+      _reportedVisibleCount = visible;
+      widget.onVisibleCountChanged?.call(visible);
+    }
+    if (finished) _ticker.stop();
   }
 
   @override
@@ -138,6 +171,7 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
     _ticker.dispose();
     _time.dispose();
     _sprite.dispose();
+    _shader?.dispose();
     super.dispose();
   }
 
