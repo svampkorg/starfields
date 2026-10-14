@@ -32,6 +32,24 @@ class Supernova {
   /// Shockwave progress 0..1 (radius grows fast, then slows: ease-out).
   static double shockwave(double t) => t < 0 ? 0 : (t / shockwaveSeconds).clamp(0.0, 1.0);
 
+  /// Shockwave band at progress [p], in normalized units: the crest radius, a
+  /// short leading edge outside it (the compressed front) and a long trailing
+  /// fade inside it (where the wave has already passed). The trail grows as
+  /// the wave travels and never reaches past the center.
+  static ({double radius, double lead, double trail, double intensity}) shockwaveBand(double p, double reach) {
+    final radius = reach * Curves.easeOutCubic.transform(p);
+    return (
+      radius: radius,
+      lead: 0.004 + 0.012 * p,
+      trail: min(radius, 0.05 + 0.4 * p),
+      intensity: pow(1 - p, 1.5).toDouble(),
+    );
+  }
+
+  /// Trailing fade: brightness at fraction x (0 = crest .. 1 = end of the
+  /// trail) relative to the trail's start, a gradual quadratic fall-off.
+  static double trailFade(double x) => pow(1 - x.clamp(0.0, 1.0), 2).toDouble();
+
   /// Opacity of the blue afterglow.
   static double afterglow(double t) {
     if (t < 0 || t >= afterglowSeconds) return 0;
@@ -97,23 +115,25 @@ class SupernovaPainter extends CustomPainter {
       );
     }
 
-    // Shockwave: a soft glowing band that widens and fades as it expands.
+    // Shockwave: a sharp bright front with a long fade behind it, towards
+    // the center, where the wave has already passed.
     final p = Supernova.shockwave(t);
     if (p < 1) {
-      final radius = reach * Curves.easeOutCubic.transform(p);
-      final width = 0.01 + 0.12 * p;
-      final intensity = pow(1 - p, 1.5).toDouble();
-      final outer = radius + width * 0.5;
+      final band = Supernova.shockwaveBand(p, reach);
+      final outer = band.radius + band.lead;
       double at(double r) => (r / outer).clamp(0.0, 1.0);
+      const trailStrength = 0.55; // just behind the crest, relative to the crest
+      const samples = [1.0, 0.75, 0.5, 0.3, 0.15, 0.05]; // fractions of the trail, inner to outer
       fill(
         [
-          _ringColor.withAlpha(0),
-          _ringColor.withValues(alpha: intensity * 0.35),
-          _ringColor.withValues(alpha: intensity),
-          _ringColor.withValues(alpha: intensity * 0.3),
+          // Inner end of the trail (fully faded) out to the crest...
+          for (final x in samples)
+            _ringColor.withValues(alpha: band.intensity * trailStrength * Supernova.trailFade(x)),
+          _ringColor.withValues(alpha: band.intensity),
+          // ...then the short leading edge.
           _ringColor.withAlpha(0),
         ],
-        [at(radius - width), at(radius - width / 2), at(radius), at(radius + width / 4), 1.0],
+        [for (final x in samples) at(band.radius - band.trail * x), at(band.radius), 1.0],
         outer,
       );
     }

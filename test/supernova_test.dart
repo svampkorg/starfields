@@ -27,4 +27,16 @@ void main() {
       previous = glow;
     }
   });
+
+  test('shockwave: sharp front, long gradual trail towards the center', () {
+    for (var p = 0.05; p < 1; p += 0.1) {
+      final band = Supernova.shockwaveBand(p, 0.8);
+      expect(band.trail, greaterThan(band.lead * 4), reason: 'at progress $p');
+      expect(band.radius - band.trail, greaterThanOrEqualTo(0)); // never past the center
+    }
+    // The trail fades gradually: monotonic, quadratic.
+    expect(Supernova.trailFade(0), 1);
+    expect(Supernova.trailFade(0.5), closeTo(0.25, 1e-9));
+    expect(Supernova.trailFade(1), 0);
+  });
 }
