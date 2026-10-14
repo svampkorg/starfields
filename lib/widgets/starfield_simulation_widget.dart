@@ -9,6 +9,7 @@ import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/renderers/styled_stars_painter.dart';
 import 'package:starfields/starfield/starfield.dart';
 import 'package:starfields/widgets/scaling_gradient_widget.dart';
+import 'package:starfields/widgets/supernova.dart';
 
 /// How the stars are drawn.
 enum StarfieldRenderer {
@@ -243,9 +244,14 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
             ),
           ),
         ),
-        if (_explosionShowing && widget.renderer != StarfieldRenderer.hyperspace)
-          _regrowingCore()
-        else
+        if (_explosionShowing && widget.renderer != StarfieldRenderer.hyperspace) ...[
+          _regrowingCore(),
+          RepaintBoundary(
+            child: CustomPaint(
+              painter: SupernovaPainter(starfield: _starfield, time: _time),
+            ),
+          ),
+        ] else
           const ScalingGradientWidget(),
       ],
     );

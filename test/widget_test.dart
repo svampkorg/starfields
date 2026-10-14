@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starfields/main.dart';
 import 'package:starfields/renderers/star_shaders.dart';
+import 'package:starfields/widgets/supernova.dart';
 import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
@@ -62,8 +63,11 @@ void main() {
       expect(coreRadii(tester), [greaterThan(early), 1.5]);
       expect(visibleStars(tester), lessThan(150)); // absorbed and not respawned
 
+      bool supernova() =>
+          find.byWidgetPredicate((w) => w is CustomPaint && w.painter is SupernovaPainter).evaluate().isNotEmpty;
       await pumpFrames(tester, 30); // just past the burst
       expect(coreRadii(tester), isEmpty); // both cores gone at once
+      expect(supernova(), isTrue); // flash, shockwave, afterglow
       // Nearly every star bursts out (a few old ones have left and now wait).
       expect(visibleStars(tester), greaterThan(190));
 
@@ -75,6 +79,7 @@ void main() {
 
       await pumpFrames(tester, 200); // sequence over
       expect(coreRadii(tester), [1.5]);
+      expect(supernova(), isFalse);
       expect(find.text('Explode'), findsOneWidget); // ready for another one
     });
 
