@@ -171,6 +171,15 @@ class StarsPainter extends CustomPainter {
   /// Radius in pixels of the pre-rendered glow sprite.
   static const double spriteRadius = 128;
 
+  /// The glow gradient is transparent beyond this fraction of its radius, so
+  /// the sprite only covers that part: no GPU work on invisible pixels.
+  static const double _visibleGlow = 0.8;
+
+  /// Tails narrower than this (logical pixels) are skipped. These are the
+  /// sub-pixel slivers of stars that have not started growing yet: invisible
+  /// under the white core, but thousands of them cost real fill time.
+  static const double _minTailWidth = 0.25;
+
   /// Vertices per tail: four triangles, three color stops along the tail.
   static const int _tailVertices = 12;
 
@@ -211,7 +220,9 @@ class StarsPainter extends CustomPainter {
     const center = Offset(spriteRadius, spriteRadius);
     const gradient = RadialGradient(
       colors: [Colors.white, Colors.redAccent, Colors.transparent],
-      stops: [0.0, 0.2, 0.8],
+      // Original stops 0.0, 0.2, 0.8 of the glow radius, rescaled to the
+      // visible part, which fills the whole sprite.
+      stops: [0.0, 0.2 / _visibleGlow, 1.0],
     );
     final recorder = ui.PictureRecorder();
     Canvas(recorder).drawCircle(
@@ -238,8 +249,8 @@ class StarsPainter extends CustomPainter {
       final py = centerY + starfield.y[i] * size.height;
       final starSize = starfield.size[i];
 
-      // Glow: radius starSize * 5, sprite centered on the star.
-      final scale = starSize * 5 / spriteRadius;
+      // Glow: radius starSize * 5 (visible part 80 %), sprite centered on the star.
+      final scale = starSize * 5 * _visibleGlow / spriteRadius;
       final t = i * 4;
       _transforms[t] = scale;
       _transforms[t + 1] = 0;
@@ -252,7 +263,7 @@ class StarsPainter extends CustomPainter {
       var dy = centerY - py;
       final distance = sqrt(dx * dx + dy * dy);
       var length = 0.0, nx = 0.0, ny = 0.0;
-      if (distance > 0.5) {
+      if (distance > 0.5 && starSize >= _minTailWidth) {
         dx /= distance;
         dy /= distance;
         length = min(starSize * 10 + 20, distance);
