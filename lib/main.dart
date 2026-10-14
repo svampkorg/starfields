@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/widgets/scaling_gradient_widget.dart';
 import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await StarShaders.load();
   runApp(const MyApp());
 }
 

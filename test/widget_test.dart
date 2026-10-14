@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starfields/main.dart';
+import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
 void main() {
+  setUpAll(StarShaders.load);
+
   testWidgets('starfield animates without errors', (tester) async {
     await tester.pumpWidget(const MyApp());
     for (var i = 0; i < 120; i++) {
@@ -63,12 +66,25 @@ void main() {
       expect(find.text('stars 200 / 200'), findsOneWidget);
     });
 
-    testWidgets('shader renderer is not selectable yet', (tester) async {
+    testWidgets('unimplemented renderers are not selectable', (tester) async {
       await tester.pumpWidget(const MyApp());
-      await tester.tap(find.text('Shader'));
+      await tester.tap(find.text('Procedural'));
       await pumpFrames(tester, 2);
       final button = tester.widget<SegmentedButton<StarfieldRenderer>>(find.byType(SegmentedButton<StarfieldRenderer>));
       expect(button.selected, {StarfieldRenderer.batched});
+    });
+
+    testWidgets('switching to the styled renderer keeps the stars', (tester) async {
+      await tester.pumpWidget(const MyApp());
+      await pumpFrames(tester, 150);
+      expect(find.text('stars 200 / 200'), findsOneWidget);
+
+      await tester.tap(find.text('Styled'));
+      await pumpFrames(tester, 2);
+      final button = tester.widget<SegmentedButton<StarfieldRenderer>>(find.byType(SegmentedButton<StarfieldRenderer>));
+      expect(button.selected, {StarfieldRenderer.styled});
+      expect(find.text('stars 200 / 200'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('H hides and shows the controls', (tester) async {

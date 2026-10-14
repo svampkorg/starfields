@@ -16,6 +16,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/widgets/scaling_gradient_widget.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
@@ -29,7 +30,9 @@ final StarfieldRenderer renderer = StarfieldRenderer.values.byName(
 
 final _boundaryKey = GlobalKey();
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await StarShaders.load();
   runApp(
     MaterialApp(
       debugShowCheckedModeBanner: false,
