@@ -7,7 +7,7 @@ import 'package:starfields/starfield/starfield.dart';
 
 /// Draws the whole starfield with one full-screen fragment shader
 /// (`shaders/procedural_stars.frag`). No per-star data: the [Starfield] is
-/// only used for its settings (count, speed, explosion and its start time).
+/// only used for its settings (count, speed, explosion).
 class ProceduralStarsPainter extends CustomPainter {
   final Starfield starfield;
   final ui.FragmentShader shader;
@@ -36,13 +36,7 @@ class ProceduralStarsPainter extends CustomPainter {
   }
 
   void _compute(Size size) {
-    layers.compute(
-      count: starfield.count,
-      tickSeconds: starfield.tickSeconds,
-      explode: !starfield.respawn,
-      age: time.value - starfield.startTime,
-      size: size,
-    );
+    layers.compute(count: starfield.count, tickSeconds: starfield.tickSeconds, time: time.value, size: size);
   }
 
   @override
@@ -54,9 +48,8 @@ class ProceduralStarsPainter extends CustomPainter {
       ..setFloat(i++, size.width)
       ..setFloat(i++, size.height)
       ..setFloat(i++, renderScale)
-      ..setFloat(i++, starfield.respawn ? 0 : 1)
-      ..setFloat(i++, time.value - starfield.startTime)
-      ..setFloat(i++, starfield.count / ProceduralLayers.layers);
+      ..setFloat(i++, _explosionAge())
+      ..setFloat(i++, Starfield.dropOffSeconds);
     for (final value in layers.layer) {
       shader.setFloat(i++, value);
     }
@@ -81,6 +74,15 @@ class ProceduralStarsPainter extends CustomPainter {
       _imagePaint,
     );
     image.dispose();
+  }
+
+  /// Seconds since the latest explosion, or -1 when none is (still) visible.
+  double _explosionAge() {
+    final start = starfield.explosionStart;
+    if (start == null) return -1;
+    final age = time.value - start;
+    // Long after the burst every star follows the steady rules again.
+    return age >= 0 && age < 60 ? age : -1;
   }
 
   @override

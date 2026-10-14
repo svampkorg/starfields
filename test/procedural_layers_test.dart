@@ -7,8 +7,8 @@ import 'package:starfields/renderers/procedural_layers.dart';
 void main() {
   const size = Size(2014, 1245);
 
-  ProceduralLayers compute(int count, {double age = 10, bool explode = false, Size screen = size}) =>
-      ProceduralLayers()..compute(count: count, tickSeconds: 0.008, explode: explode, age: age, size: screen);
+  ProceduralLayers compute(int count, {double age = 10, Size screen = size}) =>
+      ProceduralLayers()..compute(count: count, tickSeconds: 0.008, time: age, size: screen);
 
   test('cells are at least twice the glow reach, so only one neighbour can be reached', () {
     for (final screen in [size, const Size(400, 800), const Size(3840, 2160)]) {

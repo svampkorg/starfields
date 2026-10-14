@@ -17,18 +17,6 @@ void main() {
     expect(find.byType(StarfieldSimulationWidget), findsOneWidget);
   });
 
-  testWidgets('explode mode renders and stops ticking once all stars are gone', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: StarfieldSimulationWidget(numberOfStars: 50, explode: true)));
-    for (var i = 0; i < 30; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-    // A star whose origin is almost exactly at the center can take minutes to
-    // leave the screen; jump far ahead so all of them have.
-    await tester.pump(const Duration(hours: 1));
-    await tester.pump(const Duration(milliseconds: 16));
-    expect(tester.binding.hasScheduledFrame, isFalse);
-  });
-
   group('controls', () {
     Future<void> pumpFrames(WidgetTester tester, int frames) async {
       for (var i = 0; i < frames; i++) {
@@ -46,24 +34,39 @@ void main() {
       expect(find.text('stars 10,000 / 10,000'), findsOneWidget);
     });
 
-    testWidgets('explode and restore', (tester) async {
+    int visibleStars(WidgetTester tester) {
+      final text = tester.widget<Text>(find.textContaining('stars ')).data!;
+      return int.parse(text.split(' ')[1].replaceAll(',', ''));
+    }
+
+    // The growing core: the explosion's hard-light gradient (the static one
+    // from ScalingGradientWidget has radius 1.5).
+    Iterable<double> coreRadius(WidgetTester tester) => tester
+        .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+        .map((box) => box.decoration)
+        .whereType<BoxDecoration>()
+        .where((d) => d.backgroundBlendMode == BlendMode.hardLight && d.gradient is RadialGradient)
+        .map((d) => (d.gradient! as RadialGradient).radius)
+        .where((radius) => radius != 1.5);
+
+    testWidgets('explode: spawning stops and the core grows, then everything bursts out', (tester) async {
       await tester.pumpWidget(const MyApp());
-      await pumpFrames(tester, 10);
+      await pumpFrames(tester, 600); // ~10 s: a steady starfield
+      expect(visibleStars(tester), 200);
+      expect(coreRadius(tester), isEmpty);
 
       await tester.tap(find.text('Explode'));
-      await pumpFrames(tester, 2);
-      expect(find.text('Restore'), findsOneWidget);
-      expect(find.text('stars 200 / 200'), findsOneWidget); // every star at once
+      await pumpFrames(tester, 30);
+      final early = coreRadius(tester).single;
+      await pumpFrames(tester, 60); // ~1.4 s in
+      expect(coreRadius(tester).single, greaterThan(early)); // the core grows
+      expect(visibleStars(tester), lessThan(150)); // absorbed and not respawned
 
-      await tester.pump(const Duration(hours: 1));
-      await pumpFrames(tester, 2);
-      expect(find.text('stars 0 / 200'), findsOneWidget);
-      expect(tester.binding.hasScheduledFrame, isFalse);
-
-      await tester.tap(find.text('Restore'));
-      await pumpFrames(tester, 150);
-      expect(find.text('Explode'), findsOneWidget);
-      expect(find.text('stars 200 / 200'), findsOneWidget);
+      await pumpFrames(tester, 30); // past the burst
+      expect(visibleStars(tester), 200);
+      await pumpFrames(tester, 40); // flash over
+      expect(coreRadius(tester), isEmpty);
+      expect(find.text('Explode'), findsOneWidget); // ready for another one
     });
 
     testWidgets('hyperspace renders, and explode becomes a jump that keeps running', (tester) async {

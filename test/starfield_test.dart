@@ -88,13 +88,93 @@ void main() {
     fail('star never respawned');
   });
 
-  test('explode spawns every star at once and never respawns', () {
-    final field = Starfield(count: 50, respawn: false, random: Random(2))..update(0);
-    expect(field.visibleCount, 50);
-    expect(field.isFinished, isFalse);
-    field.update(1e6);
-    expect(field.visibleCount, 0);
-    expect(field.isFinished, isTrue);
+  group('explosion', () {
+    int within(Starfield f, double distance) {
+      var n = 0;
+      for (var i = 0; i < f.visibleCount; i++) {
+        if (max(f.x[i].abs(), f.y[i].abs()) < distance) n++;
+      }
+      return n;
+    }
+
+    Starfield steadyField() {
+      final field = Starfield(count: 2000, random: Random(21));
+      for (var t = 0.0; t <= 30; t += 1 / 60) {
+        field.update(t);
+      }
+      return field;
+    }
+
+    test('absorbs the stars near the center and stops spawning', () {
+      final field = steadyField();
+      expect(within(field, 0.015), greaterThan(500)); // most stars live near the center
+      field
+        ..explode(30)
+        ..update(30);
+      expect(within(field, 0.015), 0);
+
+      var previous = field.visibleCount;
+      for (var t = 30.0; t < 30 + Starfield.dropOffSeconds; t += 1 / 60) {
+        field.update(t);
+        expect(within(field, 0.015), 0, reason: 'no new stars at ${t.toStringAsFixed(2)} s');
+        expect(field.visibleCount, lessThanOrEqualTo(previous));
+        previous = field.visibleCount;
+      }
+      expect(previous, lessThan(1000)); // the field has thinned out
+    });
+
+    test('bursts every waiting star out of the core at once', () {
+      final field = steadyField()..explode(30);
+      for (var t = 30.0; t < 30 + Starfield.dropOffSeconds; t += 1 / 60) {
+        field.update(t);
+      }
+      final before = field.visibleCount;
+      field.update(30 + Starfield.dropOffSeconds);
+      expect(field.visibleCount, 2000); // every star is flying again
+      expect(within(field, 0.031), greaterThanOrEqualTo(2000 - before)); // all at the core
+    });
+
+    test('settles back into a steady starfield', () {
+      double outside(Starfield f) => 1 - within(f, 0.05) / f.visibleCount;
+      final reference = steadyField();
+      for (var t = 30.0; t <= 90; t += 1 / 60) {
+        reference.update(t);
+      }
+      final field = steadyField()..explode(30);
+      for (var t = 30.0; t <= 90; t += 1 / 60) {
+        field.update(t);
+      }
+      expect(field.visibleCount, 2000);
+      expect(outside(field), closeTo(outside(reference), 0.1));
+    });
+  });
+
+  test('resuming after a pause does not synchronise the stars', () {
+    // Fraction of stars that are out of the center region: about constant in a
+    // steady starfield. A synchronised respawn would put them all back at the
+    // center at once, and they would then move out together as a wave.
+    double outside(Starfield f) {
+      var n = 0;
+      for (var i = 0; i < f.visibleCount; i++) {
+        if (max(f.x[i].abs(), f.y[i].abs()) > 0.05) n++;
+      }
+      return n / f.visibleCount;
+    }
+
+    final steady = Starfield(count: 2000, random: Random(11));
+    for (var t = 0.0; t <= 60; t += 1 / 60) {
+      steady.update(t);
+    }
+    final expected = outside(steady);
+
+    final paused = Starfield(count: 2000, random: Random(11));
+    for (var t = 0.0; t <= 20; t += 1 / 60) {
+      paused.update(t);
+    }
+    for (var t = 60.0; t <= 61; t += 1 / 60) {
+      paused.update(t); // resume after 40 s
+      expect(outside(paused), closeTo(expected, 0.08), reason: 'at ${t.toStringAsFixed(2)} s');
+    }
   });
 
   test('catches up after a long pause without replaying every life', () {
@@ -136,16 +216,6 @@ void main() {
         field.update(t);
         expect(field.visibleCount, 20);
       }
-    });
-
-    test('growing an exploded field starts a new burst', () {
-      final field = Starfield(count: 10, respawn: false, random: Random(9))..update(1e6);
-      expect(field.isFinished, isTrue);
-      field
-        ..resize(30, time: 1e6)
-        ..update(1e6);
-      expect(field.visibleCount, 20);
-      expect(field.isFinished, isFalse);
     });
   });
 }

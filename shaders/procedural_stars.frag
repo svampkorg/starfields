@@ -21,14 +21,16 @@
 
 uniform vec2 uSize;          // logical pixels
 uniform float uScale;        // shader pixels per logical pixel (resolution scaling)
-uniform float uExplode;      // 0: steady starfield, 1: explosion
-uniform float uExplodeAge;   // seconds since the explosion started
-uniform float uExplodeDensity;  // explosion: stars per layer per unit area
+// Explosion: x = seconds since it started (-1: none), y = seconds until the
+// burst. Same rules as the CPU Starfield: spawning stops, stars still near the
+// center are absorbed, and at the burst they all come out of the core.
+uniform vec2 uExplosion;
 // Per layer: x = cell size (rho and theta), y = angular cell count,
 // z = scroll offset in rho, w = expected stars per cell (steady mode).
 uniform vec4 uLayer[10];
 // Per layer: x = k (rho per second), y = size growth per second,
-// z = largest glow reach (radians, and rho) - neighbours further away are skipped.
+// z = largest glow reach (radians, and rho) - neighbours further away are skipped,
+// w = expected stars per cell in the burst band of an explosion.
 uniform vec4 uMotion[10];
 
 out vec4 fragColor;
@@ -92,18 +94,12 @@ void main() {
         float j = j0 + float(b);
         float rowRho = j * cell + layer.z;  // rho of the row's lower edge now
 
-        float expected = layer.w;
-        if (uExplode > 0.5) {
-          // Explosion: stars spread uniformly over the screen at the start, so
-          // density per (rho, theta) grows with e^(2 rho) at their start rho.
-          float startRho = rowRho + 0.5 * cell - motion.x * uExplodeAge;
-          expected = uExplodeDensity * exp(2.0 * startRho) * cell * dTheta;
-        }
+        bool exploding = uExplosion.x >= 0.0;
+        float slots = exploding ? max(layer.w, motion.w) : layer.w;
 
         for (int m = 0; m < kMaxPerCell; m++) {
-          if (float(m) >= expected) break;
+          if (float(m) >= slots) break;
           vec3 h = hash34(vec4(float(s), i, mod(j, kRowPeriod), float(m)));
-          if (h.x >= expected - float(m)) continue;  // fractional chance for the last slot
 
           float starTheta = (i + h.y) * dTheta;
           float starRho = rowRho + h.z * cell;
@@ -111,15 +107,32 @@ void main() {
           vec2 d = exp(starRho) * dir;
           if (max(abs(d.x), abs(d.y)) > 0.7) continue;  // left the screen
 
-          float age = 1e9;
-          if (uExplode > 0.5) {
-            vec2 d0 = d * exp(-motion.x * uExplodeAge);
-            if (max(abs(d0.x), abs(d0.y)) > 0.5) continue;  // started off screen
-            age = uExplodeAge;
+          // Which population this star slot belongs to decides its density.
+          float expected = layer.w;
+          float growLimit = 1e9;
+          if (exploding) {
+            float age = uExplosion.x;
+            float atStart = max(abs(d.x), abs(d.y)) * exp(-motion.x * age);
+            if (atStart >= 0.015) {
+              // Already growing when the explosion started: keeps flying.
+            } else if (age < uExplosion.y) {
+              expected = 0.0;  // absorbed into the core / spawning stopped
+            } else {
+              float sinceBurst = age - uExplosion.y;
+              float atBurst = length(d) * exp(-motion.x * sinceBurst);
+              if (atBurst >= 0.004 && atBurst <= 0.03) {
+                expected = motion.w;  // burst out of the core
+                growLimit = sinceBurst;
+              } else if (atBurst > 0.03) {
+                expected = 0.0;
+              }  // else: spawned after the burst, steady
+            }
           }
+          if (h.x >= expected - float(m)) continue;  // fractional chance for the last slot
+
           // Size grows once the star is 0.015 from the center on either axis.
           float growRho = log(0.015 / max(abs(dir.x), abs(dir.y)));
-          float growing = min((starRho - growRho) / motion.x, age);
+          float growing = min((starRho - growRho) / motion.x, growLimit);
           float size = 0.1 + motion.y * max(0.0, growing);
 
           vec2 star = center + d * uSize;

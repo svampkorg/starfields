@@ -8,7 +8,7 @@
 //   INSTANT=true       spawn all stars at once (via resize) instead of one per
 //                      8 ms like the original start-up; for large star counts
 //   RENDERER=batched   a StarfieldRenderer name
-//   EXPLODE=true       explosion instead of the steady starfield
+//   EXPLODE=true       explode (hyperspace: jump) after EXPLODE_AT_MS (default 0)
 //   WARMUP_MS=2000     wait before measuring (default: spawn time + 2 s)
 //   SHOT=name.png      also save a snapshot of the last frame into the
 //                      (sandboxed) app's temp dir
@@ -27,6 +27,7 @@ const int measureSeconds = int.fromEnvironment('SECONDS', defaultValue: 8);
 const String shotPath = String.fromEnvironment('SHOT');
 const bool instant = bool.fromEnvironment('INSTANT');
 const bool explode = bool.fromEnvironment('EXPLODE');
+const int explodeAtMs = int.fromEnvironment('EXPLODE_AT_MS');
 final StarfieldRenderer renderer = StarfieldRenderer.values.byName(
   const String.fromEnvironment('RENDERER', defaultValue: 'batched'),
 );
@@ -116,6 +117,7 @@ class _BenchStarfield extends StatefulWidget {
 
 class _BenchStarfieldState extends State<_BenchStarfield> {
   int _count = instant ? 1 : stars;
+  bool _exploded = false;
 
   @override
   void initState() {
@@ -123,9 +125,16 @@ class _BenchStarfieldState extends State<_BenchStarfield> {
     if (instant) {
       WidgetsBinding.instance.addPostFrameCallback((_) => setState(() => _count = stars));
     }
+    if (explode) {
+      Future<void>.delayed(const Duration(milliseconds: explodeAtMs), () => setState(() => _exploded = true));
+    }
   }
 
   @override
-  Widget build(BuildContext context) =>
-      StarfieldSimulationWidget(numberOfStars: _count, renderer: renderer, explode: explode);
+  Widget build(BuildContext context) => StarfieldSimulationWidget(
+    numberOfStars: _count,
+    renderer: renderer,
+    explosions: _exploded ? 1 : 0,
+    jump: _exploded,
+  );
 }

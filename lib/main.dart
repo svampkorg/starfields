@@ -41,7 +41,8 @@ class _MyHomePageState extends State<MyHomePage> {
   final ValueNotifier<int> _visibleStars = ValueNotifier(0);
   int _starCountStep = starCountSteps.indexOf(200);
   StarfieldRenderer _renderer = StarfieldRenderer.batched;
-  bool _exploded = false;
+  int _explosions = 0;
+  bool _jumping = false;
   bool _showControls = true;
 
   int get _starCount => starCountSteps[_starCountStep];
@@ -65,7 +66,8 @@ class _MyHomePageState extends State<MyHomePage> {
             children: [
               StarfieldSimulationWidget(
                 numberOfStars: _starCount,
-                explode: _exploded,
+                explosions: _explosions,
+                jump: _jumping,
                 renderer: _renderer,
                 onVisibleCountChanged: (count) => _visibleStars.value = count,
               ),
@@ -89,8 +91,9 @@ class _MyHomePageState extends State<MyHomePage> {
                             onRendererChanged: (renderer) => setState(() => _renderer = renderer),
                             starCountStep: _starCountStep,
                             onStarCountStepChanged: (step) => setState(() => _starCountStep = step),
-                            exploded: _exploded,
-                            onExplodeToggled: () => setState(() => _exploded = !_exploded),
+                            onExplode: () => setState(() => _explosions++),
+                            jumping: _jumping,
+                            onJumpToggled: () => setState(() => _jumping = !_jumping),
                           ),
                         ),
                       ),

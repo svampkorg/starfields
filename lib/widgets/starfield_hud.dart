@@ -95,14 +95,16 @@ class _FrameStatsPanelState extends State<FrameStatsPanel> {
   }
 }
 
-/// Renderer switch, star count slider and explode / restore toggle.
+/// Renderer switch, star count slider, and an explode button (a jump / drop
+/// out toggle in hyperspace).
 class StarfieldControlBar extends StatelessWidget {
   final StarfieldRenderer renderer;
   final ValueChanged<StarfieldRenderer> onRendererChanged;
   final int starCountStep;
   final ValueChanged<int> onStarCountStepChanged;
-  final bool exploded;
-  final VoidCallback onExplodeToggled;
+  final VoidCallback onExplode;
+  final bool jumping;
+  final VoidCallback onJumpToggled;
 
   const StarfieldControlBar({
     super.key,
@@ -110,8 +112,9 @@ class StarfieldControlBar extends StatelessWidget {
     required this.onRendererChanged,
     required this.starCountStep,
     required this.onStarCountStepChanged,
-    required this.exploded,
-    required this.onExplodeToggled,
+    required this.onExplode,
+    required this.jumping,
+    required this.onJumpToggled,
   });
 
   @override
@@ -133,17 +136,18 @@ class StarfieldControlBar extends StatelessWidget {
                 showSelectedIcon: false,
                 onSelectionChanged: (selection) => onRendererChanged(selection.single),
               ),
-              FilledButton.tonalIcon(
-                onPressed: onExplodeToggled,
-                icon: Icon(exploded ? Icons.restart_alt : Icons.flare),
-                // In hyperspace an explosion is a jump to light speed.
-                label: Text(switch ((renderer, exploded)) {
-                  (StarfieldRenderer.hyperspace, false) => 'Jump',
-                  (StarfieldRenderer.hyperspace, true) => 'Drop out',
-                  (_, false) => 'Explode',
-                  (_, true) => 'Restore',
-                }),
-              ),
+              if (renderer == StarfieldRenderer.hyperspace)
+                FilledButton.tonalIcon(
+                  onPressed: onJumpToggled,
+                  icon: Icon(jumping ? Icons.keyboard_double_arrow_down : Icons.keyboard_double_arrow_up),
+                  label: Text(jumping ? 'Drop out' : 'Jump'),
+                )
+              else
+                FilledButton.tonalIcon(
+                  onPressed: onExplode,
+                  icon: const Icon(Icons.flare),
+                  label: const Text('Explode'),
+                ),
             ],
           ),
           Row(

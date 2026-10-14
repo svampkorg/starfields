@@ -39,13 +39,14 @@ class ProceduralLayers {
   /// [maxPerCell]), for the stats panel.
   double effectiveStars = 0;
 
-  void compute({
-    required int count,
-    required double tickSeconds,
-    required bool explode,
-    required double age,
-    required Size size,
-  }) {
+  /// Fraction of a star's life (in rho) spent before it starts growing; these
+  /// stars are absorbed by an explosion.
+  static const double _absorbedFraction = 0.59;
+
+  /// Width in rho of the band burst stars start in (radius 0.004 .. 0.03).
+  static const double _burstBand = 2.015;
+
+  void compute({required int count, required double tickSeconds, required double time, required Size size}) {
     final minDim = max(1.0, min(size.width, size.height));
     final aspect = max(size.width, size.height) / minDim;
     // Stars start growing 0.015 from the center (in normalized units).
@@ -67,7 +68,11 @@ class ProceduralLayers {
 
       // Steady state: a layer holds perLayer stars spread evenly over lifeRho.
       final expected = perLayer / lifeRho * cell / cells;
-      final shift = explode ? k * age : (k * age) % (cell * rowPeriod);
+      final shift = (k * time) % (cell * rowPeriod);
+      // Burst: the absorbed stars plus those that left the screen during the
+      // drop-off, all starting in the burst band.
+      final waiting = _absorbedFraction + min(1 - _absorbedFraction, k * Starfield.dropOffSeconds / lifeRho);
+      final burst = perLayer * waiting / _burstBand * cell / cells;
 
       layer
         ..[s * 4] = cell
@@ -77,9 +82,10 @@ class ProceduralLayers {
       motion
         ..[s * 4] = k
         ..[s * 4 + 1] = growth
-        ..[s * 4 + 2] = min(cell, footprintPx * aspect * 1.1);
+        ..[s * 4 + 2] = min(cell, footprintPx * aspect * 1.1)
+        ..[s * 4 + 3] = burst;
 
-      effectiveStars += explode ? perLayer : perLayer * min(1.0, maxPerCell / expected);
+      effectiveStars += perLayer * min(1.0, maxPerCell / expected);
     }
   }
 }

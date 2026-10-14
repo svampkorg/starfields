@@ -12,6 +12,10 @@ import 'dart:typed_data';
 /// so the result is frame-rate independent and no per-frame state is mutated,
 /// except when a star leaves the screen and is respawned at the center.
 ///
+/// An explosion ([explode]) stops spawning, absorbs the stars still near the
+/// center into the core, and after [dropOffSeconds] bursts all absorbed stars
+/// out of the core at once; then spawning resumes.
+///
 /// Positions are offsets from the screen center in normalized units (the screen
 /// spans -0.5..0.5 on both axes).
 class Starfield {
@@ -36,6 +40,14 @@ class Starfield {
   /// How far behind a respawn may lag before it is moved to the current time.
   static const double _maxCatchUpSeconds = 1;
 
+  /// Time from the start of an explosion to the burst.
+  static const double dropOffSeconds = 1.8;
+
+  /// Burst stars start this far from the center (normalized units): just
+  /// outside the core, so the burst is visible at once.
+  static const double _burstMinDistance = 0.004;
+  static const double _burstMaxDistance = 0.03;
+
   /// Number of stars; change it with [resize].
   int get count => _count;
   int _count = 0;
@@ -43,9 +55,6 @@ class Starfield {
   /// Duration of one step of the original simulation, in seconds. Also the
   /// interval at which stars are added at start-up.
   final double tickSeconds;
-
-  /// When false, every star is spawned at once and never respawned.
-  final bool respawn;
 
   /// Simulation time at which this starfield was created.
   final double startTime;
@@ -73,16 +82,35 @@ class Starfield {
   Float64List _size = Float64List(0);
   int visibleCount = 0;
 
-  /// Creates [count] stars. With [respawn] they appear one per tick from
-  /// [startTime], like the original start-up; otherwise all at once.
-  Starfield({required int count, this.tickSeconds = 0.008, this.respawn = true, this.startTime = 0, Random? random})
+  /// Start of the latest explosion, if any.
+  double? get explosionStart => _explosionStart;
+  double? _explosionStart;
+
+  /// Creates [count] stars that appear one per tick from [startTime], like the
+  /// original start-up.
+  Starfield({required int count, this.tickSeconds = 0.008, this.startTime = 0, Random? random})
     : _random = random ?? Random() {
     _ensureCapacity(count);
     for (var i = 0; i < count; i++) {
-      _initStar(i, startTime + (respawn ? i * tickSeconds : 0));
+      _initStar(i, startTime + i * tickSeconds);
     }
     _count = count;
   }
+
+  /// Starts an explosion at [time]: spawning stops, stars that are still near
+  /// the center (not yet growing) or not spawned yet are absorbed into the
+  /// core, and at `time + dropOffSeconds` they all burst out together.
+  void explode(double time) {
+    _explosionStart = time;
+    final burst = time + dropOffSeconds;
+    for (var i = 0; i < _count; i++) {
+      final age = time - _spawnTime[i];
+      if (age < 0 || (age < _lifetime[i] && _distanceAt(i, age) < _growThreshold)) _burst(i, burst);
+    }
+  }
+
+  /// Distance from the center on the dominant axis at [age] into a life.
+  double _distanceAt(int i, double age) => max(_originX[i].abs(), _originY[i].abs()) * exp(_rate[i] * age);
 
   /// Changes the number of stars at [time] without disturbing the existing
   /// ones. Added stars appear at once, anywhere on screen; removed stars are
@@ -120,24 +148,32 @@ class Starfield {
     _size = grow(_size);
   }
 
-  /// True when no star will ever be visible again.
-  bool get isFinished => !respawn && visibleCount == 0;
-
   /// Evaluates every star at [time] seconds since the start.
   void update(double time) {
     var n = 0;
     for (var i = 0; i < _count; i++) {
       var age = time - _spawnTime[i];
-      if (age < 0) continue;
-      if (age >= _lifetime[i] && !respawn) continue;
       while (age >= _lifetime[i]) {
-        // Respawn at the exact moment the star left the screen, so the result
-        // does not depend on the frame rate. After a long pause (e.g. app in
-        // background), skip ahead instead of replaying every lost life.
         final exitTime = _spawnTime[i] + _lifetime[i];
-        _respawn(i, time - exitTime > _maxCatchUpSeconds ? time : exitTime);
+        final explosion = _explosionStart;
+        if (explosion != null && exitTime >= explosion && exitTime < explosion + dropOffSeconds) {
+          // Spawning has stopped: this star waits for the burst.
+          _burst(i, explosion + dropOffSeconds);
+        } else if (time - exitTime > _maxCatchUpSeconds) {
+          // Long pause (app in background, a shader-only renderer active):
+          // skip the lost lives and restart at a random point of a new life,
+          // as in a steady starfield. Restarting all of them now would send
+          // them out together as a wave.
+          _respawn(i, time);
+          _spawnTime[i] -= _random.nextDouble() * _lifetime[i];
+        } else {
+          // Respawn at the exact moment the star left the screen, so the
+          // result does not depend on the frame rate.
+          _respawn(i, exitTime);
+        }
         age = time - _spawnTime[i];
       }
+      if (age < 0) continue; // not spawned yet, or waiting for a burst
       final scale = exp(_rate[i] * age);
       _x[n] = _originX[i] * scale;
       _y[n] = _originY[i] * scale;
@@ -150,6 +186,12 @@ class Starfield {
   void _respawn(int i, double time) {
     double jitter() => (_random.nextBool() ? 1 : -1) * _random.nextDouble() * _respawnJitter;
     _startLife(i, time: time, originX: jitter(), originY: jitter());
+  }
+
+  void _burst(int i, double time) {
+    final angle = _random.nextDouble() * 2 * pi;
+    final distance = _burstMinDistance + _random.nextDouble() * (_burstMaxDistance - _burstMinDistance);
+    _startLife(i, time: time, originX: distance * cos(angle), originY: distance * sin(angle));
   }
 
   void _startLife(int i, {required double time, required double originX, required double originY}) {

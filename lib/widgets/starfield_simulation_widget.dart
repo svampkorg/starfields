@@ -39,7 +39,14 @@ class StarfieldSimulationWidget extends StatefulWidget {
   /// Duration in milliseconds of one step of the original stepped simulation.
   /// Higher is slower.
   final int speed;
-  final bool explode;
+
+  /// Each increase starts an explosion: spawning stops, the core grows, then
+  /// every absorbed star bursts out (renderers other than hyperspace).
+  final int explosions;
+
+  /// Hyperspace only: jump to light speed (true) or cruise (false).
+  final bool jump;
+
   final StarfieldRenderer renderer;
 
   /// Called whenever the number of stars on screen changes.
@@ -49,7 +56,8 @@ class StarfieldSimulationWidget extends StatefulWidget {
     super.key,
     required this.numberOfStars,
     this.speed = 8,
-    this.explode = false,
+    this.explosions = 0,
+    this.jump = false,
     this.renderer = StarfieldRenderer.batched,
     this.onVisibleCountChanged,
   }) : assert(numberOfStars >= 0);
@@ -65,48 +73,43 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   late Starfield _starfield;
   late CustomPainter _painter;
   ui.FragmentShader? _shader;
+  final HyperspaceDrive _drive = HyperspaceDrive();
 
-  /// A shader-only explosion is over after this long: the slowest stars have
-  /// left the screen.
-  static const double _shaderExplosionSeconds = 15;
+  /// Core flash after the burst (the original explode effect).
+  static const double _flashSeconds = 0.5;
 
-  /// Simulation clock in seconds. Keeps counting across ticker restarts (the
-  /// ticker stops once an explosion is over), so spawn times stay valid.
+  /// Simulation clock in seconds.
   double _now = 0;
-  double _tickerStart = 0;
   int _reportedVisibleCount = -1;
+  bool _explosionShowing = false;
 
   @override
   void initState() {
     super.initState();
     _createStarfield();
-    _ticker = createTicker(_tick);
-    _startTicker();
+    _drive.engage(jump: widget.jump, time: 0);
+    _ticker = createTicker(_tick)..start();
   }
 
   @override
   void didUpdateWidget(StarfieldSimulationWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.speed != widget.speed || oldWidget.explode != widget.explode) {
+    if (oldWidget.speed != widget.speed) {
       _createStarfield();
-      _startTicker();
     } else {
-      if (oldWidget.numberOfStars != widget.numberOfStars) {
-        _starfield.resize(widget.numberOfStars, time: _now);
-        _startTicker();
-      }
+      if (oldWidget.numberOfStars != widget.numberOfStars) _starfield.resize(widget.numberOfStars, time: _now);
       // A new renderer draws the same starfield: no reset.
       if (oldWidget.renderer != widget.renderer) _createPainter();
     }
+    if (widget.explosions > oldWidget.explosions) {
+      _starfield.explode(_now);
+      _explosionShowing = true;
+    }
+    if (oldWidget.jump != widget.jump) _drive.engage(jump: widget.jump, time: _now);
   }
 
   void _createStarfield() {
-    final starfield = Starfield(
-      count: widget.numberOfStars,
-      tickSeconds: widget.speed / 1000,
-      respawn: !widget.explode,
-      startTime: _now,
-    );
+    final starfield = Starfield(count: widget.numberOfStars, tickSeconds: widget.speed / 1000, startTime: _now);
     _starfield = starfield;
     _createPainter();
   }
@@ -128,40 +131,26 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
       ),
       StarfieldRenderer.hyperspace => HyperspacePainter(
         starfield: _starfield,
+        drive: _drive,
         shader: _shader = StarShaders.hyperspace.fragmentShader(),
         time: _time,
       ),
     };
   }
 
-  void _startTicker() {
-    if (_ticker.isActive) return;
-    _tickerStart = _now;
-    _ticker.start();
-  }
-
   void _tick(Duration elapsed) {
-    _now = _tickerStart + elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+    _now = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
     final starfield = _starfield;
     _time.value = _now;
     final int visible;
-    final bool finished;
     if (widget.renderer.usesSimulation) {
       starfield.update(_now);
       visible = starfield.visibleCount;
-      finished = starfield.isFinished;
     } else {
       // Shader-only renderers: no CPU simulation; the stats show what the
       // shader draws.
-      // A procedural explosion ends; a hyperspace jump lasts until restored.
-      finished =
-          widget.renderer == StarfieldRenderer.procedural &&
-          !starfield.respawn &&
-          _now - starfield.startTime > _shaderExplosionSeconds;
       final painter = _painter;
-      visible = finished
-          ? 0
-          : painter is ProceduralStarsPainter
+      visible = painter is ProceduralStarsPainter
           ? painter.estimateStars().round()
           : HyperspacePainter.drawnStars(starfield.count);
     }
@@ -169,7 +158,37 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
       _reportedVisibleCount = visible;
       widget.onVisibleCountChanged?.call(visible);
     }
-    if (finished) _ticker.stop();
+    if (_explosionShowing && _now > starfield.explosionStart! + Starfield.dropOffSeconds + _flashSeconds) {
+      setState(() => _explosionShowing = false);
+    }
+  }
+
+  /// The core during an explosion: grows while spawning has stopped, then
+  /// flashes and collapses at the burst. Hyperspace has no explosions.
+  Widget _explosionCore() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _time,
+      builder: (context, now, _) {
+        final age = now - (_starfield.explosionStart ?? now);
+        final double radius;
+        if (age < Starfield.dropOffSeconds) {
+          radius = 0.9 * Curves.easeInQuad.transform(age / Starfield.dropOffSeconds);
+        } else {
+          final flash = ((age - Starfield.dropOffSeconds) / _flashSeconds).clamp(0.0, 1.0);
+          radius = 2.2 * (1 - Curves.easeOutSine.transform(flash));
+        }
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            backgroundBlendMode: BlendMode.hardLight,
+            gradient: RadialGradient(
+              radius: radius,
+              colors: const [Colors.white, Colors.blue, Colors.transparent],
+              stops: const [0.02, 0.2, 1.0],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -187,22 +206,7 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
       fit: StackFit.expand,
       children: [
         RepaintBoundary(child: CustomPaint(painter: _painter)),
-        if (widget.explode)
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.easeOutSine,
-            tween: Tween<double>(begin: 1.0, end: 0.0),
-            builder: (context, value, child) => DecoratedBox(
-              decoration: BoxDecoration(
-                backgroundBlendMode: BlendMode.hardLight,
-                gradient: RadialGradient(
-                  radius: value * 2.2,
-                  colors: const [Colors.white, Colors.blue, Colors.transparent],
-                  stops: const [0.02, 0.2, 1.0],
-                ),
-              ),
-            ),
-          ),
+        if (_explosionShowing && widget.renderer != StarfieldRenderer.hyperspace) _explosionCore(),
         DecoratedBox(
           decoration: BoxDecoration(
             backgroundBlendMode: BlendMode.hue,
