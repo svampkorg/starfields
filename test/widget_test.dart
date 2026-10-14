@@ -39,33 +39,42 @@ void main() {
       return int.parse(text.split(' ')[1].replaceAll(',', ''));
     }
 
-    // The growing core: the explosion's hard-light gradient (the static one
-    // from ScalingGradientWidget has radius 1.5).
-    Iterable<double> coreRadius(WidgetTester tester) => tester
+    // Radii of the hard-light core gradients: the normal core (1.5) and,
+    // during an explosion, the explosion's own growing core.
+    List<double> coreRadii(WidgetTester tester) => tester
         .widgetList<DecoratedBox>(find.byType(DecoratedBox))
         .map((box) => box.decoration)
         .whereType<BoxDecoration>()
         .where((d) => d.backgroundBlendMode == BlendMode.hardLight && d.gradient is RadialGradient)
         .map((d) => (d.gradient! as RadialGradient).radius)
-        .where((radius) => radius != 1.5);
+        .toList();
 
-    testWidgets('explode: spawning stops and the core grows, then everything bursts out', (tester) async {
+    testWidgets('explode: core grows, vanishes at the burst, pauses, then regrows with the stars', (tester) async {
       await tester.pumpWidget(const MyApp());
       await pumpFrames(tester, 600); // ~10 s: a steady starfield
       expect(visibleStars(tester), 200);
-      expect(coreRadius(tester), isEmpty);
+      expect(coreRadii(tester), [1.5]);
 
       await tester.tap(find.text('Explode'));
       await pumpFrames(tester, 30);
-      final early = coreRadius(tester).single;
-      await pumpFrames(tester, 60); // ~1.4 s in
-      expect(coreRadius(tester).single, greaterThan(early)); // the core grows
+      final early = coreRadii(tester).first;
+      await pumpFrames(tester, 60); // ~1.4 s in: charging
+      expect(coreRadii(tester), [greaterThan(early), 1.5]);
       expect(visibleStars(tester), lessThan(150)); // absorbed and not respawned
 
-      await pumpFrames(tester, 30); // past the burst
-      expect(visibleStars(tester), 200);
-      await pumpFrames(tester, 40); // flash over
-      expect(coreRadius(tester), isEmpty);
+      await pumpFrames(tester, 30); // just past the burst
+      expect(coreRadii(tester), isEmpty); // both cores gone at once
+      // Nearly every star bursts out (a few old ones have left and now wait).
+      expect(visibleStars(tester), greaterThan(190));
+
+      await pumpFrames(tester, 140); // ~2.35 s into the 2.5 s pause: still dark
+      expect(coreRadii(tester), isEmpty);
+
+      await pumpFrames(tester, 90); // regrowing
+      expect(coreRadii(tester).single, inExclusiveRange(0, 1.5));
+
+      await pumpFrames(tester, 200); // sequence over
+      expect(coreRadii(tester), [1.5]);
       expect(find.text('Explode'), findsOneWidget); // ready for another one
     });
 

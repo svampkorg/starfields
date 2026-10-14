@@ -134,6 +134,15 @@ void main() {
       expect(within(field, 0.031), greaterThanOrEqualTo(2000 - before)); // all at the core
     });
 
+    test('no stars are born during the pause after the burst', () {
+      final field = steadyField()..explode(30);
+      final burst = 30 + Starfield.dropOffSeconds;
+      for (var t = 30.0; t < burst + Starfield.burstPauseSeconds; t += 1 / 60) {
+        field.update(t);
+        if (t > burst) expect(within(field, 0.003), 0, reason: 'at +${(t - burst).toStringAsFixed(2)} s');
+      }
+    });
+
     test('stars come back gradually after the burst, without a second wave', () {
       // Newly born stars sit very close to the center. In a steady field their
       // number is about constant; after the burst it must build up gradually
@@ -144,10 +153,10 @@ void main() {
       final field = steadyField()..explode(30);
       final burst = 30 + Starfield.dropOffSeconds;
       var highest = 0;
-      for (var t = 30.0; t < burst + 12; t += 1 / 60) {
+      for (var t = 30.0; t < burst + Starfield.burstPauseSeconds + 12; t += 1 / 60) {
         field.update(t);
         if (t > burst) highest = max(highest, within(field, 0.002));
-        if ((t - burst - 0.5).abs() < 1 / 120) {
+        if ((t - burst - Starfield.burstPauseSeconds - 0.5).abs() < 1 / 120) {
           expect(within(field, 0.002), lessThan(steadyLevel * 0.25), reason: 'gradual start');
         }
       }

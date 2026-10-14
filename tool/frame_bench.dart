@@ -19,7 +19,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:starfields/renderers/star_shaders.dart';
-import 'package:starfields/widgets/scaling_gradient_widget.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
 const int stars = int.fromEnvironment('STARS', defaultValue: 200);
@@ -44,7 +43,7 @@ Future<void> main() async {
         key: _boundaryKey,
         child: const Scaffold(
           backgroundColor: Colors.black,
-          body: Stack(fit: StackFit.expand, children: [_BenchStarfield(), ScalingGradientWidget()]),
+          body: Stack(fit: StackFit.expand, children: [_BenchStarfield()]),
         ),
       ),
     ),

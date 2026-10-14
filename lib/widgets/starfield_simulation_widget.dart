@@ -8,6 +8,7 @@ import 'package:starfields/renderers/procedural_stars_painter.dart';
 import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/renderers/styled_stars_painter.dart';
 import 'package:starfields/starfield/starfield.dart';
+import 'package:starfields/widgets/scaling_gradient_widget.dart';
 
 /// How the stars are drawn.
 enum StarfieldRenderer {
@@ -74,9 +75,6 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
   late CustomPainter _painter;
   ui.FragmentShader? _shader;
   final HyperspaceDrive _drive = HyperspaceDrive();
-
-  /// Core flash after the burst (the original explode effect).
-  static const double _flashSeconds = 0.5;
 
   /// Simulation clock in seconds.
   double _now = 0;
@@ -158,35 +156,56 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
       _reportedVisibleCount = visible;
       widget.onVisibleCountChanged?.call(visible);
     }
-    if (_explosionShowing && _now > starfield.explosionStart! + Starfield.dropOffSeconds + _flashSeconds) {
+    if (_explosionShowing && _explosionAge(_now) > _explosionSeconds) {
       setState(() => _explosionShowing = false);
     }
   }
 
-  /// The core during an explosion: grows while spawning has stopped, then
-  /// flashes and collapses at the burst. Hyperspace has no explosions.
+  /// Charge, burst, pause, regrowth: the whole visible sequence.
+  static const double _explosionSeconds =
+      Starfield.dropOffSeconds + Starfield.burstPauseSeconds + Starfield.comebackRampSeconds;
+
+  double _explosionAge(double now) => now - (_starfield.explosionStart ?? now);
+
+  /// The explosion's own core: grows while spawning has stopped, and is gone
+  /// at the burst.
   Widget _explosionCore() {
     return ValueListenableBuilder<double>(
       valueListenable: _time,
       builder: (context, now, _) {
-        final age = now - (_starfield.explosionStart ?? now);
-        final double radius;
-        if (age < Starfield.dropOffSeconds) {
-          radius = 0.9 * Curves.easeInQuad.transform(age / Starfield.dropOffSeconds);
-        } else {
-          final flash = ((age - Starfield.dropOffSeconds) / _flashSeconds).clamp(0.0, 1.0);
-          radius = 2.2 * (1 - Curves.easeOutSine.transform(flash));
-        }
+        final age = _explosionAge(now);
+        if (age >= Starfield.dropOffSeconds) return const SizedBox.shrink();
         return DecoratedBox(
           decoration: BoxDecoration(
             backgroundBlendMode: BlendMode.hardLight,
             gradient: RadialGradient(
-              radius: radius,
+              radius: 0.9 * Curves.easeInQuad.transform(age / Starfield.dropOffSeconds),
               colors: const [Colors.white, Colors.blue, Colors.transparent],
               stops: const [0.02, 0.2, 1.0],
             ),
           ),
         );
+      },
+    );
+  }
+
+  /// The normal core: vanishes at the burst, stays away during the pause, and
+  /// grows back while stars come back.
+  Widget _regrowingCore() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _time,
+      builder: (context, now, _) {
+        final age = _explosionAge(now);
+        final regrow = age - Starfield.dropOffSeconds - Starfield.burstPauseSeconds;
+        final double scale;
+        if (age < Starfield.dropOffSeconds) {
+          scale = 1;
+        } else if (regrow < 0) {
+          scale = 0;
+        } else {
+          scale = Curves.easeInOut.transform((regrow / Starfield.comebackRampSeconds).clamp(0.0, 1.0));
+        }
+        return ScalingGradientWidget(scale: scale);
       },
     );
   }
@@ -224,6 +243,10 @@ class _StarfieldSimulationWidgetState extends State<StarfieldSimulationWidget> w
             ),
           ),
         ),
+        if (_explosionShowing && widget.renderer != StarfieldRenderer.hyperspace)
+          _regrowingCore()
+        else
+          const ScalingGradientWidget(),
       ],
     );
   }

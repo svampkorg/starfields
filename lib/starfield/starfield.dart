@@ -14,8 +14,9 @@ import 'dart:typed_data';
 ///
 /// An explosion ([explode]) stops spawning, absorbs the stars still near the
 /// center into the core, and after [dropOffSeconds] bursts all absorbed stars
-/// out of the core at once; afterwards each burst star is reborn at a random
-/// point of its own spawn period, so spawning comes back gradually.
+/// out of the core at once. After a pause of [burstPauseSeconds] spawning
+/// comes back gradually: each burst star is reborn at a random point of its
+/// own spawn period.
 ///
 /// Positions are offsets from the screen center in normalized units (the screen
 /// spans -0.5..0.5 on both axes).
@@ -47,6 +48,13 @@ class Starfield {
   /// Average rho a star travels during one life: ln(0.7) - (ln(1e-4) - 0.5),
   /// so a star with rate k is born about every _lifeRho / k seconds.
   static const double _lifeRho = 9.35;
+
+  /// After the burst, no star is born for this long (the core is gone).
+  static const double burstPauseSeconds = 2.5;
+
+  /// After the pause, the birth rate ramps up to the steady rate over this
+  /// long.
+  static const double comebackRampSeconds = 3;
 
   /// Burst stars start this far from the center (normalized units): just
   /// outside the core, so the burst is visible at once.
@@ -161,16 +169,15 @@ class Starfield {
       while (age >= _lifetime[i]) {
         final exitTime = _spawnTime[i] + _lifetime[i];
         final explosion = _explosionStart;
-        if (explosion != null && exitTime >= explosion && exitTime < explosion + dropOffSeconds) {
+        final burst = explosion == null ? 0.0 : explosion + dropOffSeconds;
+        if (explosion != null && exitTime >= explosion && exitTime < burst) {
           // Spawning has stopped: this star waits for the burst.
-          _burst(i, explosion + dropOffSeconds);
-        } else if (explosion != null && _spawnTime[i] == explosion + dropOffSeconds) {
-          // A burst star. They all left the core together, so respawning each
-          // as it leaves would send them out again as a second wave. Instead
-          // wait a random part of its natural spawn period: the random phase
-          // a star has in a steady starfield. Fast stars come back sooner and
-          // more often, exactly as in steady state, so nothing overshoots.
-          _respawn(i, exitTime + _random.nextDouble() * _lifeRho / _rate[i]);
+          _burst(i, burst);
+        } else if (explosion != null &&
+            (_spawnTime[i] == burst || (exitTime >= burst && exitTime < burst + burstPauseSeconds))) {
+          // A burst star, or one leaving during the pause: comes back with the
+          // gradual comeback instead of respawning now.
+          _respawn(i, _comebackTime(i, exitTime, burst + burstPauseSeconds));
         } else if (time - exitTime > _maxCatchUpSeconds) {
           // Long pause (app in background, a shader-only renderer active):
           // skip the lost lives and restart at a random point of a new life,
@@ -198,6 +205,26 @@ class Starfield {
   void _respawn(int i, double time) {
     double jitter() => (_random.nextBool() ? 1 : -1) * _random.nextDouble() * _respawnJitter;
     _startLife(i, time: time, originX: jitter(), originY: jitter());
+  }
+
+  /// When star [i], which left the screen at [exitTime], is reborn after an
+  /// explosion. Burst stars all left the core together; respawning each as it
+  /// leaves would send them out again as a second wave.
+  ///
+  /// In a steady starfield a star is born every `period = _lifeRho / rate`
+  /// seconds at a random phase. So propose exactly those times (random phase,
+  /// then every period) - fast stars come back sooner and more often, giving
+  /// the steady mix of speeds - and accept each proposal with a probability
+  /// that ramps from 0 to 1 over [comebackRampSeconds] after [resume]
+  /// ("thinning"). The total birth rate then ramps up linearly to the steady
+  /// rate, without overshoot.
+  double _comebackTime(int i, double exitTime, double resume) {
+    final period = _lifeRho / _rate[i];
+    var time = max(exitTime, resume) + _random.nextDouble() * period;
+    while (_random.nextDouble() > min(1.0, (time - resume) / comebackRampSeconds)) {
+      time += period;
+    }
+    return time;
   }
 
   void _burst(int i, double time) {

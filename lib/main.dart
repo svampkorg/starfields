@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:starfields/renderers/star_shaders.dart';
-import 'package:starfields/widgets/scaling_gradient_widget.dart';
 import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
@@ -71,7 +70,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 renderer: _renderer,
                 onVisibleCountChanged: (count) => _visibleStars.value = count,
               ),
-              const ScalingGradientWidget(),
               // Above the blended overlays, so the controls are not tinted.
               if (_showControls)
                 SafeArea(

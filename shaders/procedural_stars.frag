@@ -22,9 +22,12 @@
 uniform vec2 uSize;          // logical pixels
 uniform float uScale;        // shader pixels per logical pixel (resolution scaling)
 // Explosion: x = seconds since it started (-1: none), y = seconds until the
-// burst. Same rules as the CPU Starfield: spawning stops, stars still near the
-// center are absorbed, and at the burst they all come out of the core.
-uniform vec2 uExplosion;
+// burst, z = pause after the burst, w = unused. Same rules as the CPU
+// Starfield: spawning stops, stars still near the center are absorbed, at the
+// burst they all come out of the core, and after the pause births come back
+// gradually. (A vec4, not a vec3: a vec3 before the vec4 arrays broke the
+// uniform layout - the whole shader rendered magenta.)
+uniform vec4 uExplosion;
 // Per layer: x = cell size (rho and theta), y = angular cell count,
 // z = scroll offset in rho, w = expected stars per cell (steady mode).
 uniform vec4 uLayer[10];
@@ -40,7 +43,7 @@ const int kMaxPerCell = 4;
 const float kRowPeriod = 4096.0;  // row hash period; the CPU wraps the scroll offset to match
 const float kTwoPi = 6.28318530718;
 const float kBirthRho = -9.7;        // typical rho at birth (~1e-4 from the center)
-const float kComebackSeconds = 2.0;  // post-burst birth ramp
+const float kComebackSeconds = 3.0;  // birth ramp after the pause (Starfield.comebackRampSeconds)
 
 const vec4 kWhite = vec4(1.0, 1.0, 1.0, 1.0);
 const vec4 kRed = vec4(1.0, 0.3216, 0.3216, 1.0);  // Colors.redAccent
@@ -128,10 +131,10 @@ void main() {
               } else if (atBurst > 0.03) {
                 expected = 0.0;
               } else {
-                // Spawned after the burst: births come back gradually, like
-                // the CPU Starfield (burst stars are reborn as they leave).
-                float bornAfterBurst = sinceBurst - (starRho - kBirthRho) / motion.x;
-                expected *= clamp(bornAfterBurst / kComebackSeconds, 0.0, 1.0);
+                // Spawned after the burst: none during the pause, then births
+                // come back gradually, like the CPU Starfield.
+                float bornAfterPause = sinceBurst - uExplosion.z - (starRho - kBirthRho) / motion.x;
+                expected *= clamp(bornAfterPause / kComebackSeconds, 0.0, 1.0);
               }
             }
           }

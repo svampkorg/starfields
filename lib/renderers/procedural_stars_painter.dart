@@ -49,7 +49,9 @@ class ProceduralStarsPainter extends CustomPainter {
       ..setFloat(i++, size.height)
       ..setFloat(i++, renderScale)
       ..setFloat(i++, _explosionAge())
-      ..setFloat(i++, Starfield.dropOffSeconds);
+      ..setFloat(i++, Starfield.dropOffSeconds)
+      ..setFloat(i++, Starfield.burstPauseSeconds)
+      ..setFloat(i++, 0); // padding: uExplosion is a vec4
     for (final value in layers.layer) {
       shader.setFloat(i++, value);
     }
