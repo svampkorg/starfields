@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:starfields/platform/app_window.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
 /// Star counts selectable with the slider.
@@ -87,7 +88,10 @@ class _FrameStatsPanelState extends State<FrameStatsPanel> {
               builder: (context, visible, _) =>
                   Text('stars ${formatCount(visible)} / ${formatCount(widget.totalStars)}'),
             ),
-            Text('H: hide controls', style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              AppWindow.supportsFullScreen ? 'H: hide controls · F: full screen' : 'H: hide controls',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
       ),
@@ -147,6 +151,15 @@ class StarfieldControlBar extends StatelessWidget {
                   onPressed: onExplode,
                   icon: const Icon(Icons.flare),
                   label: const Text('Explode'),
+                ),
+              if (AppWindow.supportsFullScreen)
+                ValueListenableBuilder(
+                  valueListenable: AppWindow.fullScreen,
+                  builder: (context, fullScreen, _) => IconButton.filledTonal(
+                    onPressed: AppWindow.toggleFullScreen,
+                    tooltip: fullScreen ? 'Exit full screen (F)' : 'Full screen (F)',
+                    icon: Icon(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
+                  ),
                 ),
             ],
           ),

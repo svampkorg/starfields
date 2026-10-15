@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starfields/platform/app_window.dart';
 import 'package:starfields/renderers/star_shaders.dart';
 import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
@@ -7,6 +8,7 @@ import 'package:starfields/widgets/starfield_simulation_widget.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await StarShaders.load();
+  await AppWindow.init();
   runApp(const MyApp());
 }
 
@@ -55,7 +57,10 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.keyH): () => setState(() => _showControls = !_showControls)},
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyH): () => setState(() => _showControls = !_showControls),
+        const SingleActivator(LogicalKeyboardKey.keyF): AppWindow.toggleFullScreen,
+      },
       child: Focus(
         autofocus: true,
         child: Scaffold(
