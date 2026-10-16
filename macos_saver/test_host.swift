@@ -8,6 +8,8 @@
 //   tool/build_saver.sh                    # also builds build/saver/test_host
 //   build/saver/test_host build/saver/Starfields.saver 10
 //   build/saver/test_host build/saver/Starfields.saver 10 --window
+//   build/saver/test_host <saver> 10 --window --shots 2,4.5 --shot-prefix /tmp/x
+//     (screenshots of the first window at those seconds: /tmp/x-2.0.png, ...)
 //
 // Logs: log show --last 1m --predicate 'subsystem == "com.bosse.starfields.saver"'
 import AppKit
@@ -44,6 +46,21 @@ for frame in frames {
 }
 views.forEach { $0.startAnimation() }
 print("test_host: \(views.count) view(s) started")
+
+func option(_ name: String) -> String? {
+  guard let i = arguments.firstIndex(of: name), i + 1 < arguments.count else { return nil }
+  return arguments[i + 1]
+}
+if let shots = option("--shots"), let prefix = option("--shot-prefix") {
+  for time in shots.split(separator: ",").compactMap({ Double($0) }) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + time) {
+      let capture = Process()
+      capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+      capture.arguments = ["-x", "-o", "-l\(windows[0].windowNumber)", "\(prefix)-\(time).png"]
+      try? capture.run()  // not waited for: the animation keeps running
+    }
+  }
+}
 DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
   views.forEach { $0.stopAnimation() }
   print("test_host: stopped")

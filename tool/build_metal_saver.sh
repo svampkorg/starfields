@@ -6,8 +6,9 @@
 #   tool/build_metal_saver.sh            # compile + assemble + sign
 #   tool/build_metal_saver.sh --install  # ... and install (replaces an older copy)
 #
-# Hyperspace.metal is compiled at runtime from source, so no offline Metal
-# toolchain is needed. Also builds build/metal_saver/test_host
+# The fragment shader is generated from shaders/hyperspace_saver.frag with
+# impellerc (from the Flutter cache) and, like FullScreen.metal, compiled at
+# runtime from source, so no offline Metal toolchain is needed. Also builds build/metal_saver/test_host
 # (macos_saver/test_host.swift).
 #
 # Start it now: open -a ScreenSaverEngine. Dismiss it with the mouse; do not
@@ -19,6 +20,9 @@ cd "$(dirname "$0")/.."
 OUT="$PWD/build/metal_saver"
 SAVER="$OUT/StarfieldsMetal.saver"
 MIN_MACOS=12.0
+FLUTTER_ROOT="$(dirname "$(dirname "$(command -v flutter)")")"
+ENGINE="$FLUTTER_ROOT/bin/cache/artifacts/engine/darwin-x64"
+IMPELLERC="$ENGINE/impellerc"
 
 rm -rf "$SAVER"
 mkdir -p "$SAVER/Contents/MacOS" "$SAVER/Contents/Resources" "$OUT/obj"
@@ -35,7 +39,12 @@ lipo -create "$OUT/obj/StarfieldsMetal-arm64" "$OUT/obj/StarfieldsMetal-x86_64" 
   -output "$SAVER/Contents/MacOS/StarfieldsMetal"
 
 cp macos_saver_metal/Info.plist "$SAVER/Contents/Info.plist"
-cp macos_saver_metal/Hyperspace.metal "$SAVER/Contents/Resources/"
+cp macos_saver_metal/FullScreen.metal "$SAVER/Contents/Resources/"
+# One shader source: Flutter's own shader compiler turns the runtime-effect
+# GLSL into Metal source (no --iplr: plain MSL text, not a Flutter bundle).
+"$IMPELLERC" --runtime-stage-metal --input-type=frag \
+  --input=shaders/hyperspace_saver.frag --sl="$SAVER/Contents/Resources/HyperspaceSaver.metal" \
+  --spirv="$OUT/obj/hyperspace_saver.spv" --include=shaders --include="$ENGINE/shader_lib"
 
 # Ad-hoc signature: fine on this machine. Sharing needs Developer ID + notarization.
 codesign --force --sign - "$SAVER"
