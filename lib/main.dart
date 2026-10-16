@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:starfields/platform/app_window.dart';
+import 'package:starfields/platform/saver_channel.dart';
 import 'package:starfields/renderers/star_shaders.dart';
+import 'package:starfields/widgets/screensaver_app.dart';
 import 'package:starfields/widgets/starfield_hud.dart';
 import 'package:starfields/widgets/starfield_simulation_widget.dart';
 
@@ -10,6 +12,17 @@ Future<void> main() async {
   await StarShaders.load();
   await AppWindow.init();
   runApp(const MyApp());
+}
+
+/// Entry point of the macOS screen saver (macos_saver/), started by name from
+/// the saver's FlutterEngine. It must live in the root library, or AOT tree
+/// shaking drops it.
+@pragma('vm:entry-point')
+Future<void> screensaverMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await StarShaders.load();
+  SaverChannel.reportFrameStats();
+  runApp(const ScreensaverApp());
 }
 
 class MyApp extends StatelessWidget {
