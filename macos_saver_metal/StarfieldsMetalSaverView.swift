@@ -404,6 +404,12 @@ extension StarfieldsMetalSaverView {
     // 0 in cruise .. 1 at warp (and while the stars stretch out).
     let stretch = (state.stretch - JumpCycle.cruise.stretch) / (JumpCycle.lightSpeed.stretch - JumpCycle.cruise.stretch)
     let warp = Float(min(max(stretch, 0), 1))
+    // The clouds' tunnel (far away -> travelling through them) follows the
+    // speed, 0 at cruise .. 1 at light speed: it holds through the brake and
+    // comes with the exponential creep, sudden at the end like the stars.
+    // (Following the stretch, it all happened while the stars braked.)
+    let tunnelSpeed = (state.speed - JumpCycle.cruise.speed) / (JumpCycle.lightSpeed.speed - JumpCycle.cruise.speed)
+    let tunnel = min(max(tunnelSpeed, 0), 1)
     // Clouds: barely moving far away in cruise; at warp they rush past (we
     // travel through them). Their speed changes, so their travel is
     // integrated - a changing factor times the total travel would jump.
@@ -413,7 +419,7 @@ extension StarfieldsMetalSaverView {
     // A fresh start (the clock restarts), or a pause (the covered System
     // Settings thumbnail): last frame's history is stale.
     if gap.map({ $0 < 0 || $0 > 0.25 }) ?? true { clearHistory = true }
-    let cloudSpeed = state.speed / JumpCycle.lightSpeed.speed * Self.warpSpeed * (0.3 + 0.9 * Double(warp))
+    let cloudSpeed = state.speed / JumpCycle.lightSpeed.speed * Self.warpSpeed * (0.3 + 0.9 * tunnel)
     cloudTravel = (cloudTravel + cloudSpeed * dt).truncatingRemainder(dividingBy: 1000)
     // Scaled so that light speed (2.2) travels at the warp speed (1.6).
     let travel = cycle.drive.travel(now) * Self.warpSpeed / JumpCycle.lightSpeed.speed
@@ -443,7 +449,7 @@ extension StarfieldsMetalSaverView {
       blur: warp,
       lines: warp,
       cloudTravel: Float(cloudTravel),
-      tunnel: warp,
+      tunnel: Float(tunnel),
       feedbackDecay: Float(trailWeight),
       feedbackZoom: Float(trailZoom),
       lensPos: lens.position, lensDir: lens.direction, lensRho: lens.rho, lensSize: lens.size,
