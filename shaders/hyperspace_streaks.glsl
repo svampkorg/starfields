@@ -37,11 +37,13 @@ vec3 hash34(vec4 p) {
 //   emerge:  1 = every streak starts thin and faint and grows into full width
 //            and brightness on its way out, each at its own distance (the
 //            screen saver's dark center); 0 = off (the app)
+//   seed:    which stars: the screen saver gives each display its own; 0 in
+//            the app
 // With glow 0 and width 1 only the pixel's own column is checked (the app);
 // otherwise the neighbour columns too, so halos and wider cores can spill
 // over into them.
 vec4 hyperspaceStreaks(vec2 p, vec2 size, float density, vec4 shift, vec4 len, float glow, float width,
-                       float boost, float emerge) {
+                       float boost, float emerge, float seed) {
   float scale = min(size.x, size.y);
   vec2 d = (p - size * 0.5) / scale;  // isotropic: streaks are radial on screen
   float r = max(length(d), 1e-6);
@@ -76,7 +78,7 @@ vec4 hyperspaceStreaks(vec2 p, vec2 size, float density, vec4 shift, vec4 len, f
       for (int b = 0; b < kMaxRows; b++) {
         if (float(b) >= rows) break;
         float row = row0 + float(b);
-        vec3 h = hash34(vec4(float(layer), cellColumn, mod(row, kRowPeriod), 7.0));
+        vec3 h = hash34(vec4(float(layer), cellColumn, mod(row, kRowPeriod), 7.0 + seed));
         if (h.x >= density) continue;
 
         float head = (row + h.z) * kRow + layerShift;  // rho of the streak's head

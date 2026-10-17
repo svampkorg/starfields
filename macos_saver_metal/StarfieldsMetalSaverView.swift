@@ -32,6 +32,10 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
   private var lastWarpTravel: Double?  // Warp speed: last frame's star travel, for the trail's stretch
   private var lensFlare = WarpLensFlare()  // Warp speed: now and then a star with an anamorphic streak
+  /// Which stars (and Warp speed's clouds): each view draws its own, so the
+  /// displays don't all show the same sky. New on every start - the host
+  /// often gives a view no screen to tell displays apart by.
+  private var seed: Float = 0
   private var lastFrameTime: Double?
   private var startTime: CFTimeInterval = 0
   private var stats = FrameStats()
@@ -167,6 +171,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     logWindow()
     updateDrawableSize()
     startTime = CACurrentMediaTime()
+    seed = Float.random(in: 0..<100)
     cycle = JumpCycle(settings: settings)
     stats = FrameStats()
     if #available(macOS 14, *), let screen = displayScreen {
@@ -341,6 +346,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
       encoder.setFragmentValue(Float(state.glow), index: 4)
       encoder.setFragmentValue(Float(state.width), index: 5)
       encoder.setFragmentValue(Float(state.boost), index: 6)
+      encoder.setFragmentValue(seed, index: 7)
     }
   }
 
@@ -365,6 +371,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
       encoder.setFragmentValue(SIMD4<Float>(-1, 1.8, 2.5, 0), index: 2)
       encoder.setFragmentArray(layers.layer, index: 3)
       encoder.setFragmentArray(layers.motion, index: 4)
+      encoder.setFragmentValue(seed, index: 5)
     }
   }
 }
@@ -436,7 +443,7 @@ extension StarfieldsMetalSaverView {
       feedbackDecay: Float(trailWeight),
       feedbackZoom: Float(trailZoom),
       lensPos: lens.position, lensDir: lens.direction, lensRho: lens.rho, lensSize: lens.size,
-      lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks)
+      lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks, seed: seed)
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
     warpHistoryIndex = 1 - warpHistoryIndex
     renderer.drawWarp(
@@ -471,7 +478,7 @@ private struct WarpUniforms {
   var lensBright: Float
   var lensFlicker: Float
   var lensStreaks: Float
-  var padding: Float = 0
+  var seed: Float
 }
 
 extension MTLRenderCommandEncoder {

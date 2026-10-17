@@ -40,7 +40,7 @@ struct WarpUniforms {
   float lensBright;     // 0: none
   float lensFlicker;    // ~0.7..1.3, changing fast
   float lensStreaks;    // streak strength: 1 at warp .. faint in cruise
-  float padding;
+  float seed;           // per display: its own stars and clouds (0..100)
 };
 
 struct FullScreenOut {
@@ -127,10 +127,12 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
   // On a cylinder (direction, flow): seamless around the center. The angular
   // frequency rises with r far away, so arcs stay bounded; low frequency
   // along the flow stretches the clouds radially.
-  float3 x = float3(q.dir * 2.2 * mix(0.5 + 1.7 * q.r, 1.0, u.tunnel), flow * 0.85);
+  // The display's seed shifts the whole noise field: its own clouds.
+  float3 seedOffset = u.seed * float3(1.37, 2.11, 0.73);
+  float3 x = float3(q.dir * 2.2 * mix(0.5 + 1.7 * q.r, 1.0, u.tunnel), flow * 0.85) + seedOffset;
   float clouds = fbm(x);
   float detail = fbm(x * 1.9 + float3(11.3, 4.1, 7.7));
-  float hue = fbm(float3(q.dir * 0.9, flow * 0.3 + 5.0));
+  float hue = fbm(float3(q.dir * 0.9, flow * 0.3 + 5.0) + seedOffset);
 
   // Dark in the middle, strongest at mid distance, fading towards the edges.
   // In cruise the clouds reach closer to the center (the far direction).
@@ -241,9 +243,9 @@ fragment WarpOut warpFragment(
         if (float(b) >= rows) break;
         float row = row0 + float(b);
         float rowKey = row - kRowPeriod * floor(row / kRowPeriod);
-        float3 h = hash34(float4(float(layer), cellColumn, rowKey, 3.0));
+        float3 h = hash34(float4(float(layer), cellColumn, rowKey, 3.0 + u.seed));
         if (h.x >= u.density) continue;
-        float3 h2 = hash34(float4(float(layer), cellColumn, rowKey, 9.0));
+        float3 h2 = hash34(float4(float(layer), cellColumn, rowKey, 9.0 + u.seed));
 
         float head = (row + h.z) * kStarRow + shift;  // rho of the star's front
         float rHead = exp(head);
@@ -325,7 +327,7 @@ fragment WarpOut warpFragment(
         if (float(b) >= flareRows) break;
         float row = flareRow0 + float(b);
         float rowKey = row - kRowPeriod * floor(row / kRowPeriod);
-        float3 h = hash34(float4(23.0 + float(layer), cellColumn, rowKey, 1.0));
+        float3 h = hash34(float4(23.0 + float(layer), cellColumn, rowKey, 1.0 + u.seed));
         if (h.x >= kFlareDensity) continue;
         float head = (row + h.z) * kFlareRow + flareShift;
         float rHead = exp(head);
@@ -367,7 +369,7 @@ fragment WarpOut warpFragment(
   for (int b = 0; b < 4; b++) {
     float row = lineRow0 + float(b);
     float rowKey = row - kRowPeriod * floor(row / kRowPeriod);
-    float3 h = hash34(float4(9.0, lineColumn, rowKey, 5.0));
+    float3 h = hash34(float4(9.0, lineColumn, rowKey, 5.0 + u.seed));
     if (h.x >= 0.18) continue;
     float head = (row + h.z) * kLineRow + lineShift;
     float along = (q.rho - (head - kLineLength)) / kLineLength;

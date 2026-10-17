@@ -40,6 +40,13 @@ uniform vec4 uLayer[10];
 // z = largest glow reach (radians, and rho) - neighbours further away are skipped,
 // w = expected stars per cell in the burst band of an explosion.
 uniform vec4 uMotion[10];
+#ifdef PROCEDURAL_SAVER_LOOK
+// Which stars: the screen saver gives each display its own. Declared last,
+// so the app's uniform layout is unchanged.
+uniform float uSeed;
+#else
+const float uSeed = 0.0;
+#endif
 
 
 const int kLayers = 10;
@@ -128,7 +135,7 @@ vec4 proceduralStars(vec2 p) {
 
         for (int m = 0; m < kMaxPerCell; m++) {
           if (float(m) >= slots) break;
-          vec3 h = hash34(vec4(float(s), i, mod(j, kRowPeriod), float(m)));
+          vec3 h = hash34(vec4(float(s), i, mod(j, kRowPeriod), float(m) + uSeed));
 
           float starTheta = (i + h.y) * dTheta;
           float starRho = rowRho + h.z * cell;

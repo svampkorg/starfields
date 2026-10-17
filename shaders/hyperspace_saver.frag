@@ -18,6 +18,7 @@ uniform vec4 uLength;    // per layer: streak length in rho
 uniform float uGlow;     // halo strength around the streaks
 uniform float uWidth;    // streak core width factor
 uniform float uBoost;    // streak brightness factor
+uniform float uSeed;     // per display: its own stars
 
 out vec4 fragColor;
 
@@ -25,7 +26,7 @@ void main() {
   vec2 p = FlutterFragCoord().xy;
   // Streaks emerge: they start thin and faint and grow on their way out, so
   // the center stays dark without a fixed mask.
-  vec4 streaks = hyperspaceStreaks(p, uSize, uDensity, uShift, uLength, uGlow, uWidth, uBoost, 1.0);
+  vec4 streaks = hyperspaceStreaks(p, uSize, uDensity, uShift, uLength, uGlow, uWidth, uBoost, 1.0, uSeed);
 
   fragColor = vec4(streaks.rgb, 1.0);  // premultiplied over black
 }
