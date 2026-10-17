@@ -4,7 +4,9 @@
 //
 //   0. backdropFragment - a distant, stationary nebula at full resolution,
 //      rendered once into a texture (not every frame): domain-warped fBm,
-//      filaments, dust lanes. Visible in cruise only.
+//      filaments, dust lanes, distant stars. Visible in cruise only. The
+//      stars twinkle: the pass also stores, per pixel, which star dominates
+//      it (its rhythm) and how much of the light is starlight.
 //   1. nebulaFragment - gas clouds at a quarter of the resolution into a
 //      texture: value-noise fBm in log-polar coordinates flowing outward,
 //      sampled on a cylinder so it is seamless around the center; far
@@ -53,6 +55,10 @@ struct WarpUniforms {
   float backdropZoom;   // drift with jumps off: the backdrop magnified (>= 1) ...
   float backdropNextZoom;  // ... the next layout's ...
   float backdropMix;    // ... cross-fading in (0: none)
+  float twinkleTime;    // seconds
+  float padding4;
+  float padding5;
+  float padding6;
 };
 
 struct FullScreenOut {
@@ -212,8 +218,16 @@ struct StarField {
   float level;
 };
 
-static float3 distantStars(float2 px, StarField f, float seed) {
-  float3 sum = float3(0.0);
+// A population's light at a pixel, and its brightest star there: how bright,
+// and a code (0..1) its twinkle rhythm comes from.
+struct StarLight {
+  float3 light;
+  float peak;
+  float code;
+};
+
+static StarLight distantStars(float2 px, StarField f, float seed) {
+  StarLight result = {float3(0.0), 0.0, 0.0};
   float2 base = floor(px / f.cell);
   for (int dy = -f.reach; dy <= f.reach; dy++) {
     for (int dx = -f.reach; dx <= f.reach; dx++) {
@@ -244,11 +258,20 @@ static float3 distantStars(float2 px, StarField f, float seed) {
                        exp(-v.x * v.x / thickness2) * exp(-abs(v.y) / spikeReach);
         light = (0.45 + 0.45 * h2.z) * (glow + 0.35 * spikes);
       }
-      sum += tint * light;
+      result.light += tint * light;
+      if (light > result.peak) {
+        result.peak = light;
+        result.code = fract(h.y * 9.1 + h.z * 4.7 + h2.x * 3.3);
+      }
     }
   }
-  return sum;
+  return result;
 }
+
+struct BackdropOut {
+  half4 color [[color(0)]];  // the nebula and its distant stars
+  half2 twinkle [[color(1)]];  // the dominant star's code, the starlight's share
+};
 
 static float fbmDetail(float3 x) {
   float sum = 0.0, amplitude = 0.5;
@@ -267,7 +290,7 @@ static float fbmDetail(float3 x) {
 // warping (noise bending noise: tendrils and filaments), ridges of the warp
 // field as bright filaments, dark dust lanes, and a large-scale mask so
 // dark sky remains between the clouds.
-fragment half4 backdropFragment(FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]]) {
+fragment BackdropOut backdropFragment(FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]]) {
   float scale = min(u.size.x, u.size.y);
   float2 p = (in.uv * u.size - u.size * 0.5) / scale;  // shortest side = 1
   float3 s = u.seed * float3(0.71, 1.13, 0.37) + float3(41.0, 7.0, 19.0);
@@ -294,12 +317,22 @@ fragment half4 backdropFragment(FullScreenOut in [[stage_in]], constant WarpUnif
   // diffraction crosses - fainter than the moving stars; the dust lanes
   // dim them too.
   float2 px = in.uv * u.size;
-  float3 stars = distantStars(px, StarField{7.0, 0.3, 0, 1.0}, u.seed) +
-                 distantStars(px, StarField{36.0, 0.45, 1, 2.0}, u.seed) +
-                 distantStars(px, StarField{150.0, 0.3, 1, 3.0}, u.seed);
-  light += stars * 0.8;
-  light *= 1.0 - 0.75 * dust;
-  return half4(half3(light), 1.0h);
+  StarLight faint = distantStars(px, StarField{7.0, 0.3, 0, 1.0}, u.seed);
+  StarLight bright = distantStars(px, StarField{36.0, 0.45, 1, 2.0}, u.seed);
+  StarLight flares = distantStars(px, StarField{150.0, 0.3, 1, 3.0}, u.seed);
+  float3 stars = (faint.light + bright.light + flares.light) * 0.8;
+  // Twinkle, baked: which star dominates this pixel (its rhythm, played in
+  // the composite) and how much of the pixel is starlight - so only the
+  // stars shimmer, each in its own rhythm, and the nebula stays put.
+  StarLight top = faint.peak > bright.peak ? faint : bright;
+  top = flares.peak > top.peak ? flares : top;
+  float starLum = dot(stars, float3(0.3, 0.5, 0.2));
+  float share = starLum / max(starLum + dot(light, float3(0.3, 0.5, 0.2)), 1e-4);
+  light = (light + stars) * (1.0 - 0.75 * dust);
+  BackdropOut out;
+  out.color = half4(half3(light), 1.0h);
+  out.twinkle = half2(top.code, share);
+  return out;
 }
 
 // --- Pass 2: composite -----------------------------------------------------
@@ -342,12 +375,29 @@ static float streakProfile(float distance, float reach) {
 
 // The backdrop at `uv`, magnified by its drift zoom, cross-fading into the
 // next layout while one comes in (jumps off).
-static float3 skyAt(texture2d<half> current, texture2d<half> next, float2 uv, constant WarpUniforms& u) {
+// The baked stars' twinkle: a slow shimmer in the rhythm of the pixel's
+// dominant star (0.3-1.5 Hz, its own phase, a little uneven), on the
+// starlight's share of the pixel only.
+static float twinkleAt(texture2d<half> twinkle, float2 at, float time) {
+  constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
+  float2 t = float2(twinkle.sample(nearest, at).rg);
+  float rate = 0.3 + 1.2 * fract(t.x * 13.7);
+  float phase = 6.2832 * fract(t.x * 7.1);
+  float wave = sin(6.2832 * rate * time + phase) * (0.6 + 0.4 * sin(6.2832 * rate * 0.37 * time + phase * 1.7));
+  return 1.0 + 0.35 * wave * t.y;
+}
+
+static float3 skyAt(
+  texture2d<half> current, texture2d<half> next, texture2d<half> twinkle, texture2d<half> nextTwinkle, float2 uv,
+  constant WarpUniforms& u
+) {
   constexpr sampler linear(filter::linear, address::clamp_to_edge);
   float2 center = float2(0.5);
-  float3 sky = float3(current.sample(linear, center + (uv - center) / u.backdropZoom).rgb);
+  float2 at = center + (uv - center) / u.backdropZoom;
+  float3 sky = float3(current.sample(linear, at).rgb) * twinkleAt(twinkle, at, u.twinkleTime);
   if (u.backdropMix > 0.0) {
-    float3 coming = float3(next.sample(linear, center + (uv - center) / u.backdropNextZoom).rgb);
+    float2 nextAt = center + (uv - center) / u.backdropNextZoom;
+    float3 coming = float3(next.sample(linear, nextAt).rgb) * twinkleAt(nextTwinkle, nextAt, u.twinkleTime);
     sky = mix(sky, coming, u.backdropMix);
   }
   return sky;
@@ -364,7 +414,8 @@ static float3 starTint(float h) {
 fragment WarpOut warpFragment(
   FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]],
   texture2d<half> nebula [[texture(0)]], texture2d<half> history [[texture(1)]],
-  texture2d<half> backdrop [[texture(2)]], texture2d<half> backdropNext [[texture(3)]]
+  texture2d<half> backdrop [[texture(2)]], texture2d<half> backdropNext [[texture(3)]],
+  texture2d<half> twinkle [[texture(4)]], texture2d<half> twinkleNext [[texture(5)]]
 ) {
   constexpr sampler linear(filter::linear, address::clamp_to_edge);
   float2 p = in.uv * u.size;
@@ -390,7 +441,7 @@ fragment WarpOut warpFragment(
   if (backdropAmount > 0.0) {
     float3 sky;
     if (u.tunnel <= 0.0) {
-      sky = skyAt(backdrop, backdropNext, in.uv, u);
+      sky = skyAt(backdrop, backdropNext, twinkle, twinkleNext, in.uv, u);
     } else {
       float pulled = q.r * pow(q.r, 1.5 * u.tunnel);  // distance to sample at (shortest side = 1)
       float scalePx = min(u.size.x, u.size.y);
@@ -398,7 +449,7 @@ fragment WarpOut warpFragment(
       for (int i = 0; i < 5; i++) {
         float tapR = pulled * (1.0 - 0.04 * u.tunnel * float(i));
         float2 tapUV = (u.size * 0.5 + q.dir * tapR * scalePx) / u.size;
-        sky += skyAt(backdrop, backdropNext, tapUV, u);
+        sky += skyAt(backdrop, backdropNext, twinkle, twinkleNext, tapUV, u);
       }
       sky /= 5.0;
     }
