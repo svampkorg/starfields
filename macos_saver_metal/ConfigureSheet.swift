@@ -13,11 +13,17 @@ final class ConfigureSheet: NSObject {
   private let cruise = NSSlider()
   private let light = NSSlider()
   private let stars = NSSlider()
+  private let trail = NSSlider()
+  private let trailStretch = NSSlider()
   private let cruiseValue = NSTextField(labelWithString: "")
   private let lightValue = NSTextField(labelWithString: "")
   private let starsValue = NSTextField(labelWithString: "")
+  private let trailValue = NSTextField(labelWithString: "")
+  private let trailStretchValue = NSTextField(labelWithString: "")
   private lazy var cruiseLabel = NSTextField(labelWithString: "Time between jumps:")
   private lazy var lightLabel = NSTextField(labelWithString: "Light speed lasts:")
+  private lazy var trailLabel = NSTextField(labelWithString: "Trail at warp:")
+  private lazy var trailStretchLabel = NSTextField(labelWithString: "Trail stretch:")
 
   init(settings: SaverSettings, onSave: @escaping (SaverSettings) -> Void) {
     self.settings = settings
@@ -39,6 +45,7 @@ final class ConfigureSheet: NSObject {
     for (slider, range) in [
       (cruise, SaverSettings.cruiseRange), (light, SaverSettings.lightRange),
       (stars, SaverSettings.starsRange(for: .hyperspace)),
+      (trail, SaverSettings.trailRange), (trailStretch, SaverSettings.trailStretchRange),
     ] {
       slider.minValue = range.lowerBound
       slider.maxValue = range.upperBound
@@ -51,7 +58,7 @@ final class ConfigureSheet: NSObject {
     renderer.action = #selector(changed)
     jumps.target = self
     jumps.action = #selector(changed)
-    for value in [cruiseValue, lightValue, starsValue] {
+    for value in [cruiseValue, lightValue, starsValue, trailValue, trailStretchValue] {
       value.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
       value.alignment = .right
       value.widthAnchor.constraint(equalToConstant: 56).isActive = true
@@ -63,6 +70,8 @@ final class ConfigureSheet: NSObject {
       [cruiseLabel, cruise, cruiseValue],
       [lightLabel, light, lightValue],
       [NSTextField(labelWithString: "Stars:"), stars, starsValue],
+      [trailLabel, trail, trailValue],
+      [trailStretchLabel, trailStretch, trailStretchValue],
     ])
     grid.column(at: 0).xPlacement = .trailing
     grid.cell(atColumnIndex: 1, rowIndex: 0).xPlacement = .leading  // the pop-up and the checkbox,
@@ -96,6 +105,8 @@ final class ConfigureSheet: NSObject {
     cruise.doubleValue = settings.cruiseSeconds
     light.doubleValue = settings.lightSeconds
     stars.doubleValue = settings.stars
+    trail.doubleValue = settings.trail
+    trailStretch.doubleValue = settings.trailStretch
     updateLabels()
   }
 
@@ -115,10 +126,22 @@ final class ConfigureSheet: NSObject {
     for label in [cruiseLabel, lightLabel, cruiseValue, lightValue] {
       label.textColor = jumpsOn ? .labelColor : .disabledControlTextColor
     }
+    // The trail (Warp speed's temporal feedback) only shows at warp.
+    let trailOn = jumpsOn && selectedRenderer == .warp
+    for control in [trail, trailStretch] { control.isEnabled = trailOn }
+    for label in [trailLabel, trailStretchLabel, trailValue, trailStretchValue] {
+      label.textColor = trailOn ? .labelColor : .disabledControlTextColor
+    }
     cruiseValue.stringValue = "\(Int(cruise.doubleValue.rounded())) s"
     lightValue.stringValue = "\(Int(light.doubleValue.rounded())) s"
     starsValue.stringValue = "\(Int((stars.doubleValue / 100).rounded()) * 100)"
+    trailValue.stringValue = roundedTrail == 0 ? "off" : "\(Int((roundedTrail * 100).rounded())) %"
+    trailStretchValue.stringValue = "\(Int((roundedTrailStretch * 100).rounded())) %"
   }
+
+  /// In steps of 5 %.
+  private var roundedTrail: Double { (trail.doubleValue * 20).rounded() / 20 }
+  private var roundedTrailStretch: Double { (trailStretch.doubleValue * 20).rounded() / 20 }
 
   @objc private func changed() { updateLabels() }
 
@@ -132,7 +155,9 @@ final class ConfigureSheet: NSObject {
       jumps: jumps.state == .on,
       cruiseSeconds: cruise.doubleValue.rounded(),
       lightSeconds: light.doubleValue.rounded(),
-      stars: (stars.doubleValue / 100).rounded() * 100)
+      stars: (stars.doubleValue / 100).rounded() * 100,
+      trail: roundedTrail,
+      trailStretch: roundedTrailStretch)
     settings.save()
     onSave(settings)
     close()

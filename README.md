@@ -64,6 +64,8 @@ yourself.
 | Time between jumps (Hyperspace, Warp speed) | 10–120 s | 30 s |
 | Light speed lasts (Hyperspace, Warp speed) | 5–60 s | 20 s |
 | Stars | 500–8000 (Procedural: 500–5000) | 2000 |
+| Trail at warp (Warp speed) | off–90 % (how much of the previous frame lingers) | 90 % |
+| Trail stretch (Warp speed) | 0–40 % (how far the trail moves along with the stars) | 20 % |
 
 ### A prebuilt copy from someone else
 

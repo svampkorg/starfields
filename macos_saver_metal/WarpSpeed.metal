@@ -8,7 +8,9 @@
 //   2. warpFragment - the gas, blurred along the radius (motion blur), plus
 //      the stars: soft capsules on a scrolling log-polar grid (like
 //      Hyperspace), with size, brightness and tint varying per star, a few
-//      bright flare stars, and a layer of thin, faint speed lines.
+//      bright flare stars, and a layer of thin, faint speed lines. At warp
+//      the previous frame is blended in (temporal feedback): it writes the
+//      drawable and a history texture, and reads last frame's history.
 //
 // Cruise and warp come from the same JumpCycle as Hyperspace: `travel`
 // (speed) and `blur` / `lines` (the stretch) change, the shader does not.
@@ -28,7 +30,8 @@ struct WarpUniforms {
   float lines;      // speed line brightness: 0 (cruise) .. 1 (warp)
   float cloudTravel;  // the clouds' own travel (integrated on the CPU)
   float tunnel;     // clouds: 0 far away (cruise) .. 1 travelling through (warp)
-  float2 padding;
+  float feedbackDecay;  // previous frame's weight: 0 (cruise, no feedback) .. <1 (warp)
+  float feedbackZoom;   // previous frame sampled at this scale towards the center (<= 1)
 };
 
 struct FullScreenOut {
@@ -163,6 +166,11 @@ constant float kLineColumns = 1400.0;
 constant float kLineRow = 0.45;
 constant float kLineLength = 0.9;
 
+struct WarpOut {
+  half4 color [[color(0)]];    // the drawable
+  half4 history [[color(1)]];  // read back next frame (the drawable can't be)
+};
+
 static float3 starTint(float h) {
   // Mostly blue-white and white, some cyan, a few warm.
   if (h < 0.45) return float3(0.72, 0.84, 1.0);
@@ -171,9 +179,9 @@ static float3 starTint(float h) {
   return float3(1.0, 0.86, 0.72);
 }
 
-fragment half4 warpFragment(
+fragment WarpOut warpFragment(
   FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]],
-  texture2d<half> nebula [[texture(0)]]
+  texture2d<half> nebula [[texture(0)]], texture2d<half> history [[texture(1)]]
 ) {
   constexpr sampler linear(filter::linear, address::clamp_to_edge);
   float2 p = in.uv * u.size;
@@ -356,5 +364,17 @@ fragment half4 warpFragment(
   }
 
   color += stars;
-  return half4(half3(color), 1.0h);
+
+  // Temporal feedback: the previous frame, zoomed outward a little (sampled
+  // closer to the center), so what moved outward leaves a trail behind it -
+  // smear along the motion, not just a fade. Max, not a sum: heads keep
+  // their brightness and the clouds don't build up.
+  float2 previousUV = centerUV + (in.uv - centerUV) * u.feedbackZoom;
+  float3 previous = float3(history.sample(linear, previousUV).rgb) * u.feedbackDecay;
+  color = max(color, previous);
+
+  WarpOut out;
+  out.color = half4(half3(color), 1.0h);
+  out.history = out.color;
+  return out;
 }
