@@ -35,7 +35,7 @@ for arch in arm64 x86_64; do
     -framework ScreenSaver -framework Metal -framework QuartzCore \
     macos_saver_metal/StarfieldsMetalSaverView.swift macos_saver_metal/HyperspaceDrive.swift \
     macos_saver_metal/SaverSettings.swift macos_saver_metal/ConfigureSheet.swift \
-    macos_saver_metal/ProceduralLayers.swift
+    macos_saver_metal/ProceduralLayers.swift macos_saver_metal/WarpLensFlare.swift
 done
 lipo -create "$OUT/obj/StarfieldsMetal-arm64" "$OUT/obj/StarfieldsMetal-x86_64" \
   -output "$SAVER/Contents/MacOS/StarfieldsMetal"

@@ -8,7 +8,8 @@
 //   2. warpFragment - the gas, blurred along the radius (motion blur), plus
 //      the stars: soft capsules on a scrolling log-polar grid (like
 //      Hyperspace), with size, brightness and tint varying per star, a few
-//      bright flare stars, and a layer of thin, faint speed lines. At warp
+//      bright flare stars, a layer of thin, faint speed lines, and now and
+//      then a lens flare (one warm star with an anamorphic streak). At warp
 //      the previous frame is blended in (temporal feedback): it writes the
 //      drawable and a history texture, and reads last frame's history.
 //
@@ -32,6 +33,14 @@ struct WarpUniforms {
   float tunnel;     // clouds: 0 far away (cruise) .. 1 travelling through (warp)
   float feedbackDecay;  // previous frame's weight: 0 (cruise, no feedback) .. <1 (warp)
   float feedbackZoom;   // previous frame sampled at this scale towards the center (<= 1)
+  float2 lensPos;       // lens flare (WarpLensFlare.swift): its head, logical pixels
+  float2 lensDir;       // outward, unit
+  float lensRho;        // its head's rho
+  float lensSize;       // core radius, logical pixels
+  float lensBright;     // 0: none
+  float lensFlicker;    // ~0.7..1.3, changing fast
+  float lensStreaks;    // streak strength: 1 at warp .. faint in cruise
+  float padding;
 };
 
 struct FullScreenOut {
@@ -170,6 +179,12 @@ struct WarpOut {
   half4 color [[color(0)]];    // the drawable
   half4 history [[color(1)]];  // read back next frame (the drawable can't be)
 };
+
+// A lens flare streak's falloff along its length: a bright inner part and a
+// long faint reach.
+static float streakProfile(float distance, float reach) {
+  return 0.65 * exp(-distance / reach) + 0.35 * exp(-distance / (4.0 * reach));
+}
 
 static float3 starTint(float h) {
   // Mostly blue-white and white, some cyan, a few warm.
@@ -363,6 +378,41 @@ fragment WarpOut warpFragment(
     stars += float3(0.55, 0.65, 0.9) * (0.25 * along * coverage * grown * u.lines);
   }
 
+  // Lens flare: one known star (tracked on the CPU), so it is drawn
+  // directly - a warm core and halo, motion-blurred along the radius like the
+  // flare stars, and anamorphic streaks: a thin horizontal line through the
+  // head and a shorter vertical one, growing as it comes closer, flickering.
+  // The streaks stay out of the trail (feedback): zoomed every frame, a line
+  // would smear into a band.
+  float3 streak = float3(0.0);
+  if (u.lensBright > 0.0) {
+    float2 d = p - u.size * 0.5;
+    float across = d.x * u.lensDir.y - d.y * u.lensDir.x;
+    float lensLen = 0.12 * mix(0.03, 1.0, u.blur);
+    // Along the radius in pixels, from the real radii: a rho difference times
+    // the pixel's own radius only holds near the head - near the center it
+    // put every pixel within the halo (a glow at the center).
+    float scale = min(u.size.x, u.size.y);
+    float rHeadPx = exp(u.lensRho) * scale;
+    float alongPx = q.rPx - clamp(q.rPx, exp(u.lensRho - lensLen) * scale, rHeadPx);
+    if (dot(d, u.lensDir) < 0.0) alongPx = 1e4;  // the other side of the center
+    float dist2 = alongPx * alongPx + across * across;
+    // Less shrunk at warp than the flare stars: among the streaks it must
+    // still stand out.
+    float core = u.lensSize * mix(1.0, 0.8, u.blur);
+    float halo = core * mix(5.0, 3.0, u.blur);
+    float light = 2.2 * exp(-dist2 / (core * core)) + 0.45 * exp(-dist2 / (halo * halo));
+    stars += float3(1.0, 0.86, 0.68) * light * u.lensBright * mix(1.0, u.lensFlicker, 0.5);
+
+    float2 s = p - u.lensPos;
+    float thickness2 = pow(0.5 + 0.08 * u.lensSize, 2.0);
+    float reach = 12.5 * u.lensSize * mix(0.8, 1.0, u.lensFlicker);
+    float horizontal = exp(-s.y * s.y / thickness2) * streakProfile(abs(s.x), reach);
+    float vertical = exp(-s.x * s.x / thickness2) * streakProfile(abs(s.y), 0.75 * reach);
+    float strength = 0.8 * mix(1.0, 1.6, u.blur) * u.lensStreaks;  // brighter at warp, among the speed streaks
+    streak = float3(0.45, 0.65, 1.0) * (strength * (horizontal + 0.75 * vertical) * u.lensBright * u.lensFlicker);
+  }
+
   color += stars;
 
   // Temporal feedback: the previous frame, zoomed outward a little (sampled
@@ -374,7 +424,7 @@ fragment WarpOut warpFragment(
   color = max(color, previous);
 
   WarpOut out;
-  out.color = half4(half3(color), 1.0h);
-  out.history = out.color;
+  out.history = half4(half3(color), 1.0h);
+  out.color = half4(half3(color + streak), 1.0h);
   return out;
 }

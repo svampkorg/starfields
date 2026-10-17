@@ -31,6 +31,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var warpHistoryIndex = 0  // the one written this frame
   private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
   private var lastWarpTravel: Double?  // Warp speed: last frame's star travel, for the trail's stretch
+  private var lensFlare = WarpLensFlare()  // Warp speed: now and then a star with an anamorphic streak
   private var lastFrameTime: Double?
   private var startTime: CFTimeInterval = 0
   private var stats = FrameStats()
@@ -421,6 +422,8 @@ extension StarfieldsMetalSaverView {
     // a smaller share keeps every echo behind its star, at any speed - a
     // fixed zoom overtook slow stars, and their trail pointed outward.
     let trailZoom = exp(-settings.trailStretch * frameTravel)
+    let lens = lensFlare.update(
+      time: now, travel: travel, speed: speed, size: SIMD2(Double(bounds.width), Double(bounds.height)))
     let uniforms = WarpUniforms(
       size: SIMD2(Float(bounds.width), Float(bounds.height)),
       travel: Float(travel.truncatingRemainder(dividingBy: 1200)),
@@ -431,7 +434,9 @@ extension StarfieldsMetalSaverView {
       cloudTravel: Float(cloudTravel),
       tunnel: warp,
       feedbackDecay: Float(trailWeight),
-      feedbackZoom: Float(trailZoom))
+      feedbackZoom: Float(trailZoom),
+      lensPos: lens.position, lensDir: lens.direction, lensRho: lens.rho, lensSize: lens.size,
+      lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks)
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
     warpHistoryIndex = 1 - warpHistoryIndex
     renderer.drawWarp(
@@ -459,6 +464,14 @@ private struct WarpUniforms {
   var tunnel: Float
   var feedbackDecay: Float
   var feedbackZoom: Float
+  var lensPos: SIMD2<Float>
+  var lensDir: SIMD2<Float>
+  var lensRho: Float
+  var lensSize: Float
+  var lensBright: Float
+  var lensFlicker: Float
+  var lensStreaks: Float
+  var padding: Float = 0
 }
 
 extension MTLRenderCommandEncoder {
