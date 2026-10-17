@@ -30,6 +30,11 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var warpHistory: [MTLTexture] = []  // Warp speed: the last two frames, drawable size
   private var warpBackdrop: MTLTexture?  // Warp speed: the distant nebula, rendered once
   private var backdropStale = true  // render it again (new start: new seed and biome)
+  private var backdropGeneration = 0  // the biome (WarpBiomes.generation) it shows
+  private var backdropStrip = 0  // the next strip of a re-render under way
+  /// A jump's new backdrop is rendered in strips, one per frame at light
+  /// speed (invisible then), instead of 20-40 ms in one frame.
+  fileprivate static let backdropStrips = 16
   private var warpHistoryIndex = 0  // the one written this frame
   private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
   private var lastWarpTravel: Double?  // Warp speed: last frame's star travel, for the trail's stretch
@@ -463,17 +468,51 @@ extension StarfieldsMetalSaverView {
       colorTime: Float(biomes.colorTime), nearTravel: Float(nearTravel),
       cloud0: cloudColors[0], cloud1: cloudColors[1], cloud2: cloudColors[2],
       backdrop: Float(Self.backdropBrightness))
-    // The backdrop: rendered once per start (and size), not per frame.
+    // The backdrop: rendered once per start (and size), and for each jump's
+    // new biome - its colors and layout - not per frame.
     if warpBackdrop?.width != fullWidth || warpBackdrop?.height != fullHeight {
       warpBackdrop = renderer.makeBackdropTexture(width: fullWidth, height: fullHeight)
       backdropStale = true
     }
     guard let warpBackdrop else { return }
+    var backdropUniforms = uniforms
+    let target = biomes.targetColors
+    (backdropUniforms.cloud0, backdropUniforms.cloud1, backdropUniforms.cloud2) =
+      (SIMD4(target[0], 0), SIMD4(target[1], 0), SIMD4(target[2], 0))
+    backdropUniforms.seed = biomes.layout
+    let size = "\(fullWidth)x\(fullHeight)"
+    let strips = Self.backdropStrips
     if backdropStale {
+      // A start: all at once (the saver is only just coming up).
       backdropStale = false
-      let size = "\(fullWidth)x\(fullHeight)"
-      renderer.renderBackdrop(into: warpBackdrop, uniforms: uniforms) { millis in
+      backdropGeneration = biomes.generation
+      backdropStrip = 0
+      renderer.renderBackdrop(into: warpBackdrop, uniforms: backdropUniforms, strips: 0..<strips, of: strips) { millis in
         log.notice("backdrop \(size, privacy: .public) rendered: gpu \(millis, format: .fixed(precision: 1)) ms")
+      }
+    } else if backdropGeneration != biomes.generation {
+      // A jump's new biome: in strips once the tunnel is complete and the
+      // backdrop invisible; if the drop-out comes first (or light speed
+      // was never quite reached), the rest at once.
+      let range: Range<Int>?
+      if tunnel >= 1 {
+        range = backdropStrip..<(backdropStrip + 1)
+      } else if backdropStrip > 0 || speed < 0.9 {
+        range = backdropStrip..<strips
+      } else {
+        range = nil  // still entering the tunnel
+      }
+      if let range {
+        renderer.renderBackdrop(into: warpBackdrop, uniforms: backdropUniforms, strips: range, of: strips) { millis in
+          if range.upperBound == strips {
+            log.notice("backdrop \(size, privacy: .public) re-rendered, last strips \(range.lowerBound)..<\(strips): gpu \(millis, format: .fixed(precision: 1)) ms")
+          }
+        }
+        backdropStrip = range.upperBound
+        if backdropStrip == strips {
+          backdropGeneration = biomes.generation
+          backdropStrip = 0
+        }
       }
     }
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
@@ -653,16 +692,27 @@ private final class Renderer {
     return device.makeTexture(descriptor: descriptor)
   }
 
-  /// Renders Warp speed's backdrop into `texture`, in a command buffer of its
-  /// own (before the frame's, on the same queue); `gpuTime` gets its GPU ms.
-  func renderBackdrop(into texture: MTLTexture, uniforms: WarpUniforms, gpuTime: @escaping (Double) -> Void) {
+  /// Renders Warp speed's backdrop into `texture` - the horizontal `strips`
+  /// of `count` (all of them, or a few per frame) - in a command buffer of
+  /// its own (before the frame's, on the same queue); `gpuTime` gets its GPU
+  /// ms.
+  func renderBackdrop(
+    into texture: MTLTexture, uniforms: WarpUniforms, strips: Range<Int>, of count: Int,
+    gpuTime: @escaping (Double) -> Void
+  ) {
     guard let buffer = queue.makeCommandBuffer() else { return }
     var u = uniforms
+    let whole = strips.count == count
     let pass = MTLRenderPassDescriptor()
     pass.colorAttachments[0].texture = texture
-    pass.colorAttachments[0].loadAction = .dontCare
+    pass.colorAttachments[0].loadAction = whole ? .dontCare : .load  // keep the other strips
     pass.colorAttachments[0].storeAction = .store
     guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+    if !whole {
+      let top = texture.height * strips.lowerBound / count
+      let bottom = texture.height * strips.upperBound / count
+      encoder.setScissorRect(MTLScissorRect(x: 0, y: top, width: texture.width, height: bottom - top))
+    }
     encoder.setRenderPipelineState(backdropPipeline)
     encoder.setFragmentBytes(&u, length: MemoryLayout<WarpUniforms>.stride, index: 0)
     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)

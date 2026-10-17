@@ -26,6 +26,10 @@ struct WarpBiomes {
 
   private var generator = SaverRandom()
   private var biome: [Int]  // palette indices of the biome being arrived at
+  /// The biome's backdrop: its seed (the distant nebula's layout and stars).
+  private(set) var layout: Float = 0
+  /// Counts the biomes picked: a new one needs its backdrop rendered.
+  private(set) var generation = 0
   private var from: [SIMD3<Float>]  // colors when the fade began
   private var progress = 1.0  // 0 = `from` .. 1 = `biome`
   private var fadeSeconds = 1.0  // at light speed, for this jump's fade
@@ -43,7 +47,15 @@ struct WarpBiomes {
   init() {
     biome = Self.pick(using: &generator, avoiding: [])
     from = biome.map { Self.palette[$0] }
+    layout = Self.pickLayout(using: &generator)
   }
+
+  private static func pickLayout(using generator: inout SaverRandom) -> Float {
+    Float(generator.next() % 10_000) / 100
+  }
+
+  /// The biome's own colors, where the fade ends (for its backdrop).
+  var targetColors: [SIMD3<Float>] { biome.map { Self.palette[$0] } }
 
   /// Three different palette colors, not the same set as `current`.
   private static func pick(using generator: inout SaverRandom, avoiding current: [Int]) -> [Int] {
@@ -70,6 +82,8 @@ struct WarpBiomes {
       // A jump: head for a new biome from wherever the colors are now.
       from = colors
       biome = Self.pick(using: &generator, avoiding: biome)
+      layout = Self.pickLayout(using: &generator)
+      generation += 1
       progress = 0
       fadeSeconds = max(1, lightSeconds - Self.jumpSeconds)
     }
