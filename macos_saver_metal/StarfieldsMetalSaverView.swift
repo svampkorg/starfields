@@ -32,6 +32,13 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var backdropStale = true  // render it again (new start: new seed and biome)
   private var backdropGeneration = 0  // the biome (WarpBiomes.generation) it shows
   private var backdropStrip = 0  // the next strip of a re-render under way
+  // Drift with jumps off: the backdrop slowly approaches (zooms in), and a
+  // new layout cross-fades in now and then.
+  private var warpBackdropNext: MTLTexture?  // the coming layout (jumps off only)
+  private var backdropBorn = 0.0  // `now` when the current backdrop appeared
+  private var driftStrip = 0  // strips of the coming layout rendered
+  private var driftFadeStart: Double?  // its cross-fade, under way
+  private var backdropAge = 0.0  // jumps on: seconds the backdrop has been visible (its zoom)
   /// A jump's new backdrop is rendered in strips, one per frame at light
   /// speed (invisible then), instead of 20-40 ms in one frame.
   fileprivate static let backdropStrips = 16
@@ -452,7 +459,7 @@ extension StarfieldsMetalSaverView {
     let cloudColors = biomes.colors.map { SIMD4($0, 0) }
     let lens = lensFlare.update(
       time: now, travel: travel, speed: speed, size: SIMD2(Double(bounds.width), Double(bounds.height)))
-    let uniforms = WarpUniforms(
+    var uniforms = WarpUniforms(
       size: SIMD2(Float(bounds.width), Float(bounds.height)),
       travel: Float(travel.truncatingRemainder(dividingBy: 1200)),
       density: Float(min(1, settings.stars / Self.warpCells)),
@@ -467,7 +474,7 @@ extension StarfieldsMetalSaverView {
       lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks, seed: seed,
       colorTime: Float(biomes.colorTime), nearTravel: Float(nearTravel),
       cloud0: cloudColors[0], cloud1: cloudColors[1], cloud2: cloudColors[2],
-      backdrop: Float(Self.backdropBrightness))
+      backdrop: Float(Self.backdropBrightness), backdropZoom: 1, backdropNextZoom: 1, backdropMix: 0)
     // The backdrop: rendered once per start (and size), and for each jump's
     // new biome - its colors and layout - not per frame.
     if warpBackdrop?.width != fullWidth || warpBackdrop?.height != fullHeight {
@@ -487,6 +494,10 @@ extension StarfieldsMetalSaverView {
       backdropStale = false
       backdropGeneration = biomes.generation
       backdropStrip = 0
+      backdropBorn = now
+      backdropAge = 0
+      driftStrip = 0
+      driftFadeStart = nil
       renderer.renderBackdrop(into: warpBackdrop, uniforms: backdropUniforms, strips: 0..<strips, of: strips) { millis in
         log.notice("backdrop \(size, privacy: .public) rendered: gpu \(millis, format: .fixed(precision: 1)) ms")
       }
@@ -512,19 +523,82 @@ extension StarfieldsMetalSaverView {
         if backdropStrip == strips {
           backdropGeneration = biomes.generation
           backdropStrip = 0
+          backdropAge = 0  // a new backdrop starts unzoomed (invisible now)
         }
       }
     }
+    if settings.jumps {
+      // Drift in cruise: the backdrop approaches slowly while it is visible
+      // (12 % by the end of the longest cruise, 120 s - noticeable, still
+      // sharp: the texture is at 1.5x); each jump brings a new one, unzoomed.
+      backdropAge += dt * (1 - tunnel)
+      uniforms.backdropZoom = Float(1 + Self.cruiseDriftRate * backdropAge)
+    }
+    let next = settings.jumps ? nil : driftBackdrop(renderer, now: now, uniforms: &uniforms, from: backdropUniforms)
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
     warpHistoryIndex = 1 - warpHistoryIndex
     renderer.drawWarp(
-      to: drawable, nebula: warpNebula, backdrop: warpBackdrop, history: (read: read, write: write),
+      to: drawable, nebula: warpNebula, backdrop: self.warpBackdrop ?? warpBackdrop,
+      backdropNext: next ?? warpBackdrop, history: (read: read, write: write),
       clearHistory: clearHistory,
       uniforms: uniforms, gpuTime: gpuTime)
   }
 
+  /// With jumps off the backdrop would be a still image: it drifts instead -
+  /// slowly magnified (approaching it, 12 % over a period), and once per
+  /// period a new layout in the same biome is rendered (in strips, while not
+  /// yet visible) into a second texture and cross-fades in over a tenth of
+  /// the period. Returns the coming layout's texture while it fades in.
+  private func driftBackdrop(
+    _ renderer: Renderer, now: Double, uniforms: inout WarpUniforms, from backdropUniforms: WarpUniforms
+  ) -> MTLTexture? {
+    guard let current = warpBackdrop else { return nil }
+    let period = Self.driftSeconds, fade = period * 0.1
+    let rate = 0.12 / period
+    uniforms.backdropZoom = Float(1 + rate * (now - backdropBorn))
+    if driftFadeStart == nil, now - backdropBorn >= period - fade {
+      if warpBackdropNext?.width != current.width || warpBackdropNext?.height != current.height {
+        warpBackdropNext = renderer.makeBackdropTexture(width: current.width, height: current.height)
+      }
+      guard let next = warpBackdropNext else { return nil }
+      if driftStrip == 0 { biomes.newLayout() }
+      var nextUniforms = backdropUniforms
+      nextUniforms.seed = biomes.layout
+      let strips = Self.backdropStrips
+      renderer.renderBackdrop(into: next, uniforms: nextUniforms, strips: driftStrip..<(driftStrip + 1), of: strips) { _ in }
+      driftStrip += 1
+      if driftStrip == strips {
+        driftStrip = 0
+        driftFadeStart = now
+        log.notice("backdrop drift: a new layout fades in")
+      }
+    }
+    guard let fadeStart = driftFadeStart, let next = warpBackdropNext else { return nil }
+    let mix = min(1, (now - fadeStart) / fade)
+    let nextZoom = Float(1 + rate * (now - fadeStart))
+    if mix >= 1 {
+      // Faded in: it becomes the backdrop; the old texture takes the next one.
+      warpBackdropNext = current
+      warpBackdrop = next
+      backdropBorn = fadeStart
+      driftFadeStart = nil
+      uniforms.backdropZoom = nextZoom
+      return nil
+    }
+    uniforms.backdropNextZoom = nextZoom
+    uniforms.backdropMix = Float(mix)
+    return next
+  }
+
   /// Travel per second at warp (rho at layer speed 1).
   fileprivate static let warpSpeed = 1.6
+  /// The backdrop's zoom per second of cruise with jumps on: 12 % in 120 s
+  /// (8 % was hard to notice in the default 30 s cruise).
+  fileprivate static let cruiseDriftRate = 0.12 / 120
+  /// The backdrop's drift period with jumps off; STARFIELDS_DRIFT_SECONDS
+  /// shortens it (tests).
+  fileprivate static let driftSeconds =
+    ProcessInfo.processInfo.environment["STARFIELDS_DRIFT_SECONDS"].flatMap(Double.init) ?? 300
   /// The distant backdrop's brightness; STARFIELDS_BACKDROP overrides it
   /// (tests, 0 hides it).
   fileprivate static let backdropBrightness =
@@ -569,9 +643,9 @@ private struct WarpUniforms {
   var cloud1: SIMD4<Float>
   var cloud2: SIMD4<Float>
   var backdrop: Float
-  var padding1: Float = 0
-  var padding2: Float = 0
-  var padding3: Float = 0
+  var backdropZoom: Float
+  var backdropNextZoom: Float
+  var backdropMix: Float
 }
 
 extension MTLRenderCommandEncoder {
@@ -738,7 +812,7 @@ private final class Renderer {
   /// drawable and `history.write`, blending in `history.read` (the previous
   /// frame; cleared first if `clearHistory`), in one command buffer.
   func drawWarp(
-    to drawable: CAMetalDrawable, nebula: MTLTexture, backdrop: MTLTexture,
+    to drawable: CAMetalDrawable, nebula: MTLTexture, backdrop: MTLTexture, backdropNext: MTLTexture,
     history: (read: MTLTexture, write: MTLTexture), clearHistory: Bool, uniforms: WarpUniforms,
     gpuTime: @escaping (Double) -> Void
   ) {
@@ -775,6 +849,7 @@ private final class Renderer {
     encoder.setFragmentTexture(nebula, index: 0)
     encoder.setFragmentTexture(history.read, index: 1)
     encoder.setFragmentTexture(backdrop, index: 2)
+    encoder.setFragmentTexture(backdropNext, index: 3)
     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
     encoder.endEncoding()
     buffer.present(drawable)

@@ -50,9 +50,9 @@ struct WarpUniforms {
   float nearTravel;     // the near clouds' travel: the stars' (integrated on the CPU)
   float4 cloudColors[3];  // the biome (WarpBiomes.swift): base, second, accent
   float backdrop;       // the backdrop's brightness (0: off)
-  float padding1;
-  float padding2;
-  float padding3;
+  float backdropZoom;   // drift with jumps off: the backdrop magnified (>= 1) ...
+  float backdropNextZoom;  // ... the next layout's ...
+  float backdropMix;    // ... cross-fading in (0: none)
 };
 
 struct FullScreenOut {
@@ -340,6 +340,19 @@ static float streakProfile(float distance, float reach) {
   return 0.65 * exp(-distance / reach) + 0.35 * exp(-distance / (4.0 * reach));
 }
 
+// The backdrop at `uv`, magnified by its drift zoom, cross-fading into the
+// next layout while one comes in (jumps off).
+static float3 skyAt(texture2d<half> current, texture2d<half> next, float2 uv, constant WarpUniforms& u) {
+  constexpr sampler linear(filter::linear, address::clamp_to_edge);
+  float2 center = float2(0.5);
+  float3 sky = float3(current.sample(linear, center + (uv - center) / u.backdropZoom).rgb);
+  if (u.backdropMix > 0.0) {
+    float3 coming = float3(next.sample(linear, center + (uv - center) / u.backdropNextZoom).rgb);
+    sky = mix(sky, coming, u.backdropMix);
+  }
+  return sky;
+}
+
 static float3 starTint(float h) {
   // Mostly blue-white and white, some cyan, a few warm.
   if (h < 0.45) return float3(0.72, 0.84, 1.0);
@@ -351,7 +364,7 @@ static float3 starTint(float h) {
 fragment WarpOut warpFragment(
   FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]],
   texture2d<half> nebula [[texture(0)]], texture2d<half> history [[texture(1)]],
-  texture2d<half> backdrop [[texture(2)]]
+  texture2d<half> backdrop [[texture(2)]], texture2d<half> backdropNext [[texture(3)]]
 ) {
   constexpr sampler linear(filter::linear, address::clamp_to_edge);
   float2 p = in.uv * u.size;
@@ -377,7 +390,7 @@ fragment WarpOut warpFragment(
   if (backdropAmount > 0.0) {
     float3 sky;
     if (u.tunnel <= 0.0) {
-      sky = float3(backdrop.sample(linear, in.uv).rgb);
+      sky = skyAt(backdrop, backdropNext, in.uv, u);
     } else {
       float pulled = q.r * pow(q.r, 1.5 * u.tunnel);  // distance to sample at (shortest side = 1)
       float scalePx = min(u.size.x, u.size.y);
@@ -385,7 +398,7 @@ fragment WarpOut warpFragment(
       for (int i = 0; i < 5; i++) {
         float tapR = pulled * (1.0 - 0.04 * u.tunnel * float(i));
         float2 tapUV = (u.size * 0.5 + q.dir * tapR * scalePx) / u.size;
-        sky += float3(backdrop.sample(linear, tapUV).rgb);
+        sky += skyAt(backdrop, backdropNext, tapUV, u);
       }
       sky /= 5.0;
     }

@@ -54,6 +54,9 @@ struct WarpBiomes {
     Float(generator.next() % 10_000) / 100
   }
 
+  /// Another backdrop layout in the same biome (the drift with jumps off).
+  mutating func newLayout() { layout = Self.pickLayout(using: &generator) }
+
   /// The biome's own colors, where the fade ends (for its backdrop).
   var targetColors: [SIMD3<Float>] { biome.map { Self.palette[$0] } }
 
