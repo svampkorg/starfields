@@ -6,7 +6,7 @@
 #   tool/build_metal_saver.sh            # compile + assemble + sign
 #   tool/build_metal_saver.sh --install  # ... and install (replaces an older copy)
 #
-# The fragment shader is generated from shaders/hyperspace_saver.frag with
+# The fragment shaders are generated from shaders/*_saver.frag with
 # impellerc (from the Flutter cache) and, like FullScreen.metal, compiled at
 # runtime from source, so no offline Metal toolchain is needed. Also builds build/metal_saver/test_host
 # (macos_saver/test_host.swift).
@@ -34,7 +34,8 @@ for arch in arm64 x86_64; do
     -emit-library -o "$OUT/obj/StarfieldsMetal-$arch" \
     -framework ScreenSaver -framework Metal -framework QuartzCore \
     macos_saver_metal/StarfieldsMetalSaverView.swift macos_saver_metal/HyperspaceDrive.swift \
-    macos_saver_metal/SaverSettings.swift macos_saver_metal/ConfigureSheet.swift
+    macos_saver_metal/SaverSettings.swift macos_saver_metal/ConfigureSheet.swift \
+    macos_saver_metal/ProceduralLayers.swift
 done
 lipo -create "$OUT/obj/StarfieldsMetal-arm64" "$OUT/obj/StarfieldsMetal-x86_64" \
   -output "$SAVER/Contents/MacOS/StarfieldsMetal"
@@ -46,6 +47,9 @@ cp macos_saver_metal/FullScreen.metal "$SAVER/Contents/Resources/"
 "$IMPELLERC" --runtime-stage-metal --input-type=frag \
   --input=shaders/hyperspace_saver.frag --sl="$SAVER/Contents/Resources/HyperspaceSaver.metal" \
   --spirv="$OUT/obj/hyperspace_saver.spv" --include=shaders --include="$ENGINE/shader_lib"
+"$IMPELLERC" --runtime-stage-metal --input-type=frag \
+  --input=shaders/procedural_saver.frag --sl="$SAVER/Contents/Resources/ProceduralSaver.metal" \
+  --spirv="$OUT/obj/procedural_saver.spv" --include=shaders --include="$ENGINE/shader_lib"
 
 # Ad-hoc signature: fine on this machine. Sharing needs Developer ID + notarization.
 codesign --force --sign - "$SAVER"

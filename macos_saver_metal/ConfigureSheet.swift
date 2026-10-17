@@ -8,6 +8,7 @@ final class ConfigureSheet: NSObject {
   private let onSave: (SaverSettings) -> Void
   private var settings: SaverSettings
 
+  private let renderer = NSPopUpButton()
   private let jumps = NSButton(checkboxWithTitle: "Jump to light speed", target: nil, action: nil)
   private let cruise = NSSlider()
   private let light = NSSlider()
@@ -36,7 +37,8 @@ final class ConfigureSheet: NSObject {
 
   private func makeContent() -> NSView {
     for (slider, range) in [
-      (cruise, SaverSettings.cruiseRange), (light, SaverSettings.lightRange), (stars, SaverSettings.starsRange),
+      (cruise, SaverSettings.cruiseRange), (light, SaverSettings.lightRange),
+      (stars, SaverSettings.starsRange(for: .hyperspace)),
     ] {
       slider.minValue = range.lowerBound
       slider.maxValue = range.upperBound
@@ -44,6 +46,9 @@ final class ConfigureSheet: NSObject {
       slider.action = #selector(changed)
       slider.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
     }
+    renderer.addItems(withTitles: SaverRenderer.allCases.map(\.title))
+    renderer.target = self
+    renderer.action = #selector(changed)
     jumps.target = self
     jumps.action = #selector(changed)
     for value in [cruiseValue, lightValue, starsValue] {
@@ -53,13 +58,15 @@ final class ConfigureSheet: NSObject {
     }
 
     let grid = NSGridView(views: [
+      [NSTextField(labelWithString: "Style:"), renderer, NSGridCell.emptyContentView],
       [NSGridCell.emptyContentView, jumps, NSGridCell.emptyContentView],
       [cruiseLabel, cruise, cruiseValue],
       [lightLabel, light, lightValue],
       [NSTextField(labelWithString: "Stars:"), stars, starsValue],
     ])
     grid.column(at: 0).xPlacement = .trailing
-    grid.cell(atColumnIndex: 1, rowIndex: 0).xPlacement = .leading  // the checkbox, above the sliders
+    grid.cell(atColumnIndex: 1, rowIndex: 0).xPlacement = .leading  // the pop-up and the checkbox,
+    grid.cell(atColumnIndex: 1, rowIndex: 1).xPlacement = .leading  // aligned with the sliders
     grid.rowSpacing = 10
     grid.columnSpacing = 8
     grid.rowAlignment = .firstBaseline
@@ -83,6 +90,8 @@ final class ConfigureSheet: NSObject {
 
   /// Puts `settings` into the controls.
   private func show(_ settings: SaverSettings) {
+    renderer.selectItem(at: SaverRenderer.allCases.firstIndex(of: settings.renderer) ?? 0)
+    stars.maxValue = SaverSettings.starsRange(for: settings.renderer).upperBound
     jumps.state = settings.jumps ? .on : .off
     cruise.doubleValue = settings.cruiseSeconds
     light.doubleValue = settings.lightSeconds
@@ -90,8 +99,18 @@ final class ConfigureSheet: NSObject {
     updateLabels()
   }
 
+  private var selectedRenderer: SaverRenderer {
+    let index = renderer.indexOfSelectedItem
+    return SaverRenderer.allCases.indices.contains(index) ? SaverRenderer.allCases[index] : .hyperspace
+  }
+
   private func updateLabels() {
-    let jumpsOn = jumps.state == .on
+    // Only Hyperspace jumps to light speed.
+    let hyperspace = selectedRenderer == .hyperspace
+    jumps.isEnabled = hyperspace
+    // The star range depends on the style; NSSlider clamps its value.
+    stars.maxValue = SaverSettings.starsRange(for: selectedRenderer).upperBound
+    let jumpsOn = hyperspace && jumps.state == .on
     for control in [cruise, light] { control.isEnabled = jumpsOn }
     for label in [cruiseLabel, lightLabel, cruiseValue, lightValue] {
       label.textColor = jumpsOn ? .labelColor : .disabledControlTextColor
@@ -109,6 +128,7 @@ final class ConfigureSheet: NSObject {
 
   @objc private func save() {
     settings = SaverSettings(
+      renderer: selectedRenderer,
       jumps: jumps.state == .on,
       cruiseSeconds: cruise.doubleValue.rounded(),
       lightSeconds: light.doubleValue.rounded(),

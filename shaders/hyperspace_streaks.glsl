@@ -34,11 +34,14 @@ vec3 hash34(vec4 p) {
 //   glow:    strength of a soft halo around each streak
 //   width:   core width factor (1: the app's streaks)
 //   boost:   brightness factor (1: the app's streaks)
+//   emerge:  1 = every streak starts thin and faint and grows into full width
+//            and brightness on its way out, each at its own distance (the
+//            screen saver's dark center); 0 = off (the app)
 // With glow 0 and width 1 only the pixel's own column is checked (the app);
 // otherwise the neighbour columns too, so halos and wider cores can spill
 // over into them.
 vec4 hyperspaceStreaks(vec2 p, vec2 size, float density, vec4 shift, vec4 len, float glow, float width,
-                       float boost) {
+                       float boost, float emerge) {
   float scale = min(size.x, size.y);
   vec2 d = (p - size * 0.5) / scale;  // isotropic: streaks are radial on screen
   float r = max(length(d), 1e-6);
@@ -84,10 +87,18 @@ vec4 hyperspaceStreaks(vec2 p, vec2 size, float density, vec4 shift, vec4 len, f
         // distance (perspective).
         float offset = (u - c - (0.25 + 0.5 * h.y)) * dTheta * rPx;  // pixels across
         float fade = smoothstep(kFadeStart, kFadeEnd, head);
-        float brightness = along * along * fade * (0.55 + 0.45 * h.y);
+        // Emerging: full size from rFull (in units of the shortest side),
+        // which varies per streak, so there is no fixed dark disc.
+        float grown = 1.0;
+        if (emerge > 0.0) {
+          float rFull = mix(0.08, 0.3, fract(h.y * 7.13 + h.z * 3.71));
+          grown = mix(1.0, smoothstep(0.2 * rFull, rFull, exp(head)), emerge);
+        }
+        float brightness = along * along * fade * grown * (0.55 + 0.45 * h.y);
         halo += glow * brightness * exp(-offset * offset / (glowWidth * glowWidth));
 
-        float coverage = clamp(halfWidth + 0.5 - abs(offset), 0.0, 1.0) * min(1.0, 2.0 * halfWidth);
+        float streakHalfWidth = halfWidth * mix(0.35, 1.0, grown);
+        float coverage = clamp(streakHalfWidth + 0.5 - abs(offset), 0.0, 1.0) * min(1.0, 2.0 * streakHalfWidth);
         float intensity = min(1.0, brightness * boost) * coverage;
         vec3 tint = mix(vec3(0.55, 0.75, 1.0), vec3(1.0), along);  // blue tail, white head
         vec4 streak = vec4(tint * intensity, intensity);

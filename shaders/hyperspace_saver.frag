@@ -1,8 +1,9 @@
 #version 460 core
 
 // The native screen saver's look (macos_saver_metal/): light-speed streaks
-// (hyperspace_streaks.glsl) with a glow, on black, with a black hole in the
-// middle - a bright center saves no screens.
+// (hyperspace_streaks.glsl) with a glow, on black; streaks emerge thin and
+// faint near the center, so the middle stays dark - a bright center saves no
+// screens.
 //
 // Not used by the app; tool/build_metal_saver.sh compiles it to Metal with
 // impellerc. Uniforms are bound in declaration order (buffer 0, 1, ...).
@@ -22,10 +23,9 @@ out vec4 fragColor;
 
 void main() {
   vec2 p = FlutterFragCoord().xy;
-  vec4 streaks = hyperspaceStreaks(p, uSize, uDensity, uShift, uLength, uGlow, uWidth, uBoost);
-  float dist = length(p - uSize * 0.5) / min(uSize.x, uSize.y);
-  // A black hole in the middle: streaks fade out towards the center.
-  streaks *= smoothstep(0.02, 0.16, dist);
+  // Streaks emerge: they start thin and faint and grow on their way out, so
+  // the center stays dark without a fixed mask.
+  vec4 streaks = hyperspaceStreaks(p, uSize, uDensity, uShift, uLength, uGlow, uWidth, uBoost, 1.0);
 
   fragColor = vec4(streaks.rgb, 1.0);  // premultiplied over black
 }

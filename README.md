@@ -9,13 +9,13 @@ A "travel through space" starfield: a Flutter app with four renderers, and a nat
 
 | | What | Where |
 |---|---|---|
-| **Starfields Metal** (screen saver) | Native Metal screen saver: a slow cruise through the stars, and every so often a jump to light speed — the stars stretch out, the ship creeps up to speed and then punches through. Runs on every display. | `macos_saver_metal/` |
+| **Starfields Metal** (screen saver) | Native Metal screen saver, two styles: **Hyperspace** — a slow cruise through the stars, and every so often a jump to light speed: the stars stretch out, the ship creeps up to speed and then punches through; **Procedural** — glowing stars streaming out of the center, colored by speed. Runs on every display. | `macos_saver_metal/` |
 | Starfields (screen saver, experimental) | The Flutter app itself inside a screen saver. Main display only — see [below](#the-flutter-screen-saver-experimental). | `macos_saver/` |
 | The app | Flutter app (macOS desktop) with four renderers: Batched, Styled, Procedural and Hyperspace, plus a supernova explosion. | `lib/`, `shaders/` |
 
-The screen saver and the app's Hyperspace renderer share one shader source
-(`shaders/hyperspace_streaks.glsl`): the build turns the GLSL into Metal with Flutter's
-own shader compiler.
+The screen saver and the app share their shader sources
+(`shaders/hyperspace_streaks.glsl`, `shaders/procedural_stars.glsl`): the build turns the
+GLSL into Metal with Flutter's own shader compiler.
 
 ## The Starfields Metal screen saver
 
@@ -58,10 +58,11 @@ yourself.
 
 | Option | Range | Default |
 |---|---|---|
-| Jump to light speed | on / off (off: an endless cruise) | on |
-| Time between jumps | 10–120 s | 30 s |
-| Light speed lasts | 5–60 s | 20 s |
-| Stars | 500–8000 | 2000 |
+| Style | Hyperspace / Procedural | Hyperspace |
+| Jump to light speed (Hyperspace) | on / off (off: an endless cruise) | on |
+| Time between jumps (Hyperspace) | 10–120 s | 30 s |
+| Light speed lasts (Hyperspace) | 5–60 s | 20 s |
+| Stars | 500–8000 (Procedural: 500–5000) | 2000 |
 
 ### A prebuilt copy from someone else
 
@@ -126,7 +127,8 @@ STARFIELDS_CRUISE_SECONDS=3 STARFIELDS_LIGHT_SECONDS=6 \
 
 Environment overrides for test runs (they don't reach the real screen saver host):
 `STARFIELDS_JUMPS=0/1`, `STARFIELDS_CRUISE_SECONDS`, `STARFIELDS_LIGHT_SECONDS`,
-`STARFIELDS_STARS`, `STARFIELDS_RENDER_SCALE` (default 1.5 on Retina displays),
+`STARFIELDS_STARS`, `STARFIELDS_RENDERER=hyperspace/procedural`, `STARFIELDS_RENDER_SCALE`
+(default 1.5 for Hyperspace and 0.5 for Procedural, at most the display's),
 `STARFIELDS_MAX_FPS` (default 60).
 
 The saver logs fps, CPU and GPU time per frame every two seconds:

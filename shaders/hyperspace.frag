@@ -16,5 +16,5 @@ uniform vec4 uLength;    // per layer: streak length in rho
 out vec4 fragColor;
 
 void main() {
-  fragColor = hyperspaceStreaks(FlutterFragCoord().xy, uSize, uDensity, uShift, uLength, 0.0, 1.0, 1.0);
+  fragColor = hyperspaceStreaks(FlutterFragCoord().xy, uSize, uDensity, uShift, uLength, 0.0, 1.0, 1.0, 0.0);
 }
