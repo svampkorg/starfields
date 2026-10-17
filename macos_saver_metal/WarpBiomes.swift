@@ -3,7 +3,9 @@ import Foundation
 /// Warp speed's gas clouds travel through "biomes": each is three colors
 /// picked at random from a palette of nebula hues (a base, a second, an
 /// accent). On every jump a new biome is picked and the colors cross-fade
-/// into it while at warp - arriving somewhere else. Within a biome the colors
+/// into it over the whole warp, slowly at first (hidden by the fast drift),
+/// finishing as the stars slow down: the new place is a surprise when
+/// dropping out, not something to watch arrive. Within a biome the colors
 /// drift slowly (WarpSpeed.metal: the hue field and the mood waves follow
 /// `colorTime`); at warp that drift runs ~30x faster, colors racing past.
 struct WarpBiomes {
@@ -26,11 +28,15 @@ struct WarpBiomes {
   private var biome: [Int]  // palette indices of the biome being arrived at
   private var from: [SIMD3<Float>]  // colors when the fade began
   private var progress = 1.0  // 0 = `from` .. 1 = `biome`
+  private var fadeSeconds = 1.0  // at light speed, for this jump's fade
   private var wasAtWarp = false
   private(set) var colorTime = 0.0
 
-  /// Light speed seconds for the cross-fade into a new biome.
-  private static let arrivalSeconds = 8.0
+  /// The jump reaches light speed this long into "Light speed lasts"
+  /// (JumpCycle: brake 0.4 s, creep 1.6 s).
+  private static let jumpSeconds = 2.0
+  /// After the drop-out begins, what is left of the fade takes this long.
+  private static let dropOutSeconds = 1.0
   /// How much faster the color drift runs at light speed.
   private static let warpDrift = 30.0
 
@@ -47,24 +53,30 @@ struct WarpBiomes {
     }
   }
 
-  /// The colors to draw now: `from` blending into the biome.
+  /// The colors to draw now: `from` blending into the biome - ease-in
+  /// (~16 % at half the warp), the bulk late.
   var colors: [SIMD3<Float>] {
-    let t = Float(progress * progress * (3 - 2 * progress))
+    let p = progress * progress
+    let t = Float(p * p * (3 - 2 * p))
     return zip(from, biome).map { start, index in start + (Self.palette[index] - start) * t }
   }
 
-  /// `dt` in seconds, `speed` 0..1 of light speed; `drift` scales the
-  /// drift's clock (tests fast-forward it).
-  mutating func update(dt: Double, speed: Double, drift: Double) {
+  /// `dt` in seconds, `speed` 0..1 of light speed, `lightSeconds` the jump's
+  /// "Light speed lasts"; `drift` scales the drift's clock (tests
+  /// fast-forward it).
+  mutating func update(dt: Double, speed: Double, lightSeconds: Double, drift: Double) {
     let atWarp = speed >= 0.9
     if atWarp && !wasAtWarp {
       // A jump: head for a new biome from wherever the colors are now.
       from = colors
       biome = Self.pick(using: &generator, avoiding: biome)
       progress = 0
+      fadeSeconds = max(1, lightSeconds - Self.jumpSeconds)
     }
     wasAtWarp = atWarp
-    progress = min(1, progress + dt * speed / Self.arrivalSeconds)
+    // At warp: spread over the time until the drop-out; after it, the rest
+    // finishes while the stars slow down.
+    progress = min(1, progress + dt / (atWarp ? fadeSeconds : Self.dropOutSeconds))
     colorTime += dt * drift * (1 + Self.warpDrift * speed * speed)
   }
 }

@@ -431,7 +431,7 @@ extension StarfieldsMetalSaverView {
     // a smaller share keeps every echo behind its star, at any speed - a
     // fixed zoom overtook slow stars, and their trail pointed outward.
     let trailZoom = exp(-settings.trailStretch * frameTravel)
-    biomes.update(dt: dt, speed: speed, drift: Self.colorSpeed)
+    biomes.update(dt: dt, speed: speed, lightSeconds: settings.lightSeconds, drift: Self.colorSpeed)
     let cloudColors = biomes.colors.map { SIMD4($0, 0) }
     let lens = lensFlare.update(
       time: now, travel: travel, speed: speed, size: SIMD2(Double(bounds.width), Double(bounds.height)))
