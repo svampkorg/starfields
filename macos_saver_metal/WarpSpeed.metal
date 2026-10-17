@@ -198,6 +198,56 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
 
 // --- Pass 0: the backdrop, rendered once ----------------------------------
 
+static float3 starTint(float h);  // the stars' tints (pass 2)
+
+// Distant stars on a fixed grid (logical pixels): one candidate per cell,
+// at a hashed spot, kept inside the cell's middle so `reach` neighbour cells
+// cover its light. `level` keys the hash per population.
+struct StarField {
+  float cell;      // logical pixels
+  float chance;    // probability that a cell holds a star
+  int reach;       // neighbour cells checked: 0 (own) or 1 (3x3)
+  float level;
+};
+
+static float3 distantStars(float2 px, StarField f, float seed) {
+  float3 sum = float3(0.0);
+  float2 base = floor(px / f.cell);
+  for (int dy = -f.reach; dy <= f.reach; dy++) {
+    for (int dx = -f.reach; dx <= f.reach; dx++) {
+      float2 c = base + float2(dx, dy);
+      float3 h = hash34(float4(c, f.level, 61.0 + seed));
+      if (h.x >= f.chance) continue;
+      float3 h2 = hash34(float4(c, f.level, 83.0 + seed));
+      float2 v = px - (c + 0.25 + 0.5 * h.yz) * f.cell;
+      float d2 = dot(v, v);
+      float3 tint = starTint(fract(h2.y * 7.3 + h2.z * 3.1));
+      float light;
+      if (f.level < 1.5) {
+        // Faint field: tiny points, mostly very faint.
+        light = (0.04 + 0.4 * pow(h2.x, 4.0)) * exp(-d2 / 0.45);
+      } else if (f.level < 2.5) {
+        // Brighter stars: a small core and a faint glow.
+        float size = 0.6 + 1.1 * pow(h2.x, 3.0);
+        light = (0.2 + 0.55 * h2.z * h2.z) * (exp(-d2 / (size * size)) + 0.15 * exp(-d2 / (size * size * 16.0)));
+      } else {
+        // Flare stars: the flare formula (core and halo) and a faint
+        // four-point diffraction cross, as in astrophotos.
+        float core = 1.0 + 1.6 * h2.x;
+        float halo = core * 5.0;
+        float glow = 1.6 * exp(-d2 / (core * core)) + 0.35 * exp(-d2 / (halo * halo));
+        float thickness2 = pow(0.45 + 0.15 * core, 2.0);
+        float spikeReach = 9.0 * core;
+        float spikes = exp(-v.y * v.y / thickness2) * exp(-abs(v.x) / spikeReach) +
+                       exp(-v.x * v.x / thickness2) * exp(-abs(v.y) / spikeReach);
+        light = (0.45 + 0.45 * h2.z) * (glow + 0.35 * spikes);
+      }
+      sum += tint * light;
+    }
+  }
+  return sum;
+}
+
 static float fbmDetail(float3 x) {
   float sum = 0.0, amplitude = 0.5;
   for (int i = 0; i < 7; i++) {
@@ -237,6 +287,15 @@ fragment half4 backdropFragment(FullScreenOut in [[stage_in]], constant WarpUnif
   float3 color = mix(base, second, smoothstep(0.35, 0.65, warp1.y));
   color = mix(color, accent, smoothstep(0.55, 0.8, warp2.y) * 0.7);
   float3 light = color * density + mix(second, accent, 0.5) * filaments * 0.8;
+
+  // Distant stars: a faint field, brighter stars, a few flare stars with
+  // diffraction crosses - fainter than the moving stars; the dust lanes
+  // dim them too.
+  float2 px = in.uv * u.size;
+  float3 stars = distantStars(px, StarField{7.0, 0.3, 0, 1.0}, u.seed) +
+                 distantStars(px, StarField{36.0, 0.45, 1, 2.0}, u.seed) +
+                 distantStars(px, StarField{150.0, 0.3, 1, 3.0}, u.seed);
+  light += stars * 0.8;
   light *= 1.0 - 0.75 * dust;
   return half4(half3(light), 1.0h);
 }
