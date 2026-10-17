@@ -28,6 +28,8 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var procedural = ProceduralLayers()
   private var warpNebula: MTLTexture?  // Warp speed: the gas clouds, a quarter of the drawable
   private var warpHistory: [MTLTexture] = []  // Warp speed: the last two frames, drawable size
+  private var warpBackdrop: MTLTexture?  // Warp speed: the distant nebula, rendered once
+  private var backdropStale = true  // render it again (new start: new seed and biome)
   private var warpHistoryIndex = 0  // the one written this frame
   private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
   private var lastWarpTravel: Double?  // Warp speed: last frame's star travel, for the trail's stretch
@@ -174,6 +176,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     updateDrawableSize()
     startTime = CACurrentMediaTime()
     seed = Float.random(in: 0..<100)
+    backdropStale = true
     biomes = WarpBiomes()
     cycle = JumpCycle(settings: settings)
     stats = FrameStats()
@@ -458,16 +461,35 @@ extension StarfieldsMetalSaverView {
       lensPos: lens.position, lensDir: lens.direction, lensRho: lens.rho, lensSize: lens.size,
       lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks, seed: seed,
       colorTime: Float(biomes.colorTime), nearTravel: Float(nearTravel),
-      cloud0: cloudColors[0], cloud1: cloudColors[1], cloud2: cloudColors[2])
+      cloud0: cloudColors[0], cloud1: cloudColors[1], cloud2: cloudColors[2],
+      backdrop: Float(Self.backdropBrightness))
+    // The backdrop: rendered once per start (and size), not per frame.
+    if warpBackdrop?.width != fullWidth || warpBackdrop?.height != fullHeight {
+      warpBackdrop = renderer.makeBackdropTexture(width: fullWidth, height: fullHeight)
+      backdropStale = true
+    }
+    guard let warpBackdrop else { return }
+    if backdropStale {
+      backdropStale = false
+      let size = "\(fullWidth)x\(fullHeight)"
+      renderer.renderBackdrop(into: warpBackdrop, uniforms: uniforms) { millis in
+        log.notice("backdrop \(size, privacy: .public) rendered: gpu \(millis, format: .fixed(precision: 1)) ms")
+      }
+    }
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
     warpHistoryIndex = 1 - warpHistoryIndex
     renderer.drawWarp(
-      to: drawable, nebula: warpNebula, history: (read: read, write: write), clearHistory: clearHistory,
+      to: drawable, nebula: warpNebula, backdrop: warpBackdrop, history: (read: read, write: write),
+      clearHistory: clearHistory,
       uniforms: uniforms, gpuTime: gpuTime)
   }
 
   /// Travel per second at warp (rho at layer speed 1).
   fileprivate static let warpSpeed = 1.6
+  /// The distant backdrop's brightness; STARFIELDS_BACKDROP overrides it
+  /// (tests, 0 hides it).
+  fileprivate static let backdropBrightness =
+    ProcessInfo.processInfo.environment["STARFIELDS_BACKDROP"].flatMap(Double.init) ?? 1
   /// The far clouds' brightness; STARFIELDS_NEBULA=0 hides them to see the
   /// near layer alone (tests).
   fileprivate static let farClouds =
@@ -507,6 +529,10 @@ private struct WarpUniforms {
   var cloud0: SIMD4<Float>  // cloudColors[3]
   var cloud1: SIMD4<Float>
   var cloud2: SIMD4<Float>
+  var backdrop: Float
+  var padding1: Float = 0
+  var padding2: Float = 0
+  var padding3: Float = 0
 }
 
 extension MTLRenderCommandEncoder {
@@ -530,6 +556,7 @@ private final class Renderer {
   private let pipelines: [SaverRenderer: MTLRenderPipelineState]
   private let nebulaPipeline: MTLRenderPipelineState  // Warp speed, pass 1
   private let warpPipeline: MTLRenderPipelineState  // Warp speed, pass 2
+  private let backdropPipeline: MTLRenderPipelineState  // Warp speed, the backdrop (once)
 
   /// Generated source file and its entry point: impellerc names it
   /// <shader file name>_fragment_main.
@@ -584,6 +611,11 @@ private final class Renderer {
       composite.colorAttachments[0].pixelFormat = .bgra8Unorm
       composite.colorAttachments[1].pixelFormat = Self.historyFormat
       warpPipeline = try device.makeRenderPipelineState(descriptor: composite)
+      let backdrop = MTLRenderPipelineDescriptor()
+      backdrop.vertexFunction = warp.makeFunction(name: "warpVertex")
+      backdrop.fragmentFunction = warp.makeFunction(name: "backdropFragment")
+      backdrop.colorAttachments[0].pixelFormat = Self.backdropFormat
+      backdropPipeline = try device.makeRenderPipelineState(descriptor: backdrop)
     } catch {
       log.error("shader compile failed: \(error.localizedDescription, privacy: .public)")
       return nil
@@ -609,6 +641,36 @@ private final class Renderer {
     return device.makeTexture(descriptor: descriptor)
   }
 
+  /// Warp speed's backdrop: 10 bits per channel against banding in its dim
+  /// gradients, 4 bytes per pixel, drawable size.
+  private static let backdropFormat = MTLPixelFormat.rgb10a2Unorm
+
+  func makeBackdropTexture(width: Int, height: Int) -> MTLTexture? {
+    let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+      pixelFormat: Self.backdropFormat, width: width, height: height, mipmapped: false)
+    descriptor.usage = [.renderTarget, .shaderRead]
+    descriptor.storageMode = .private
+    return device.makeTexture(descriptor: descriptor)
+  }
+
+  /// Renders Warp speed's backdrop into `texture`, in a command buffer of its
+  /// own (before the frame's, on the same queue); `gpuTime` gets its GPU ms.
+  func renderBackdrop(into texture: MTLTexture, uniforms: WarpUniforms, gpuTime: @escaping (Double) -> Void) {
+    guard let buffer = queue.makeCommandBuffer() else { return }
+    var u = uniforms
+    let pass = MTLRenderPassDescriptor()
+    pass.colorAttachments[0].texture = texture
+    pass.colorAttachments[0].loadAction = .dontCare
+    pass.colorAttachments[0].storeAction = .store
+    guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+    encoder.setRenderPipelineState(backdropPipeline)
+    encoder.setFragmentBytes(&u, length: MemoryLayout<WarpUniforms>.stride, index: 0)
+    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+    encoder.endEncoding()
+    buffer.addCompletedHandler { buffer in gpuTime((buffer.gpuEndTime - buffer.gpuStartTime) * 1000) }
+    buffer.commit()
+  }
+
   /// Warp speed's previous frames: a float format (a fading trail in 8-bit
   /// gets stuck at the lowest values), 4 bytes per pixel, no alpha needed -
   /// two drawable-sized textures per display.
@@ -626,8 +688,9 @@ private final class Renderer {
   /// drawable and `history.write`, blending in `history.read` (the previous
   /// frame; cleared first if `clearHistory`), in one command buffer.
   func drawWarp(
-    to drawable: CAMetalDrawable, nebula: MTLTexture, history: (read: MTLTexture, write: MTLTexture),
-    clearHistory: Bool, uniforms: WarpUniforms, gpuTime: @escaping (Double) -> Void
+    to drawable: CAMetalDrawable, nebula: MTLTexture, backdrop: MTLTexture,
+    history: (read: MTLTexture, write: MTLTexture), clearHistory: Bool, uniforms: WarpUniforms,
+    gpuTime: @escaping (Double) -> Void
   ) {
     guard let buffer = queue.makeCommandBuffer() else { return }
     var u = uniforms
@@ -661,6 +724,7 @@ private final class Renderer {
     encoder.setFragmentBytes(&u, length: MemoryLayout<WarpUniforms>.stride, index: 0)
     encoder.setFragmentTexture(nebula, index: 0)
     encoder.setFragmentTexture(history.read, index: 1)
+    encoder.setFragmentTexture(backdrop, index: 2)
     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
     encoder.endEncoding()
     buffer.present(drawable)

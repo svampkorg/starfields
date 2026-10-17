@@ -2,6 +2,9 @@
 // shared with the app (unlike the impellerc-generated styles), because it
 // needs two passes and a texture:
 //
+//   0. backdropFragment - a distant, stationary nebula at full resolution,
+//      rendered once into a texture (not every frame): domain-warped fBm,
+//      filaments, dust lanes. Visible in cruise only.
 //   1. nebulaFragment - gas clouds at a quarter of the resolution into a
 //      texture: value-noise fBm in log-polar coordinates flowing outward,
 //      sampled on a cylinder so it is seamless around the center; far
@@ -46,6 +49,10 @@ struct WarpUniforms {
   float colorTime;      // the clouds' color drift clock (fast at warp)
   float nearTravel;     // the near clouds' travel: the stars' (integrated on the CPU)
   float4 cloudColors[3];  // the biome (WarpBiomes.swift): base, second, accent
+  float backdrop;       // the backdrop's brightness (0: off)
+  float padding1;
+  float padding2;
+  float padding3;
 };
 
 struct FullScreenOut {
@@ -189,6 +196,51 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
   return half4(half3(color), 1.0h);
 }
 
+// --- Pass 0: the backdrop, rendered once ----------------------------------
+
+static float fbmDetail(float3 x) {
+  float sum = 0.0, amplitude = 0.5;
+  for (int i = 0; i < 7; i++) {
+    sum += amplitude * valueNoise(x);
+    x = x * 2.03 + 17.1;
+    amplitude *= 0.5;
+  }
+  return sum;
+}
+
+// A distant nebula, infinitely far away: plain screen coordinates (no
+// travel, no perspective), so it stays put while everything else streams
+// past. Too costly per frame at full resolution - so it is rendered once
+// into a texture and only sampled per frame, and can afford detail: domain
+// warping (noise bending noise: tendrils and filaments), ridges of the warp
+// field as bright filaments, dark dust lanes, and a large-scale mask so
+// dark sky remains between the clouds.
+fragment half4 backdropFragment(FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]]) {
+  float scale = min(u.size.x, u.size.y);
+  float2 p = (in.uv * u.size - u.size * 0.5) / scale;  // shortest side = 1
+  float3 s = u.seed * float3(0.71, 1.13, 0.37) + float3(41.0, 7.0, 19.0);
+  float2 x = p * 1.6;
+  float2 warp1 = float2(fbmDetail(float3(x, 0.0) + s), fbmDetail(float3(x + float2(5.2, 1.3), 0.0) + s));
+  float2 warp2 = float2(fbmDetail(float3(x + 4.0 * warp1 + float2(1.7, 9.2), 1.0) + s),
+                        fbmDetail(float3(x + 4.0 * warp1 + float2(8.3, 2.8), 1.0) + s));
+  float n = fbmDetail(float3(x + 4.0 * warp2, 2.0) + s);
+
+  float region = smoothstep(0.4, 0.62, fbm(float3(p * 0.8, 3.0) + s));  // where the nebula is
+  float density = smoothstep(0.35, 0.8, n) * region;
+  float ridge = 1.0 - abs(2.0 * warp2.x - 1.0);
+  float filaments = pow(ridge, 8.0) * smoothstep(0.3, 0.6, n) * region;
+  float dust = smoothstep(0.52, 0.72, fbmDetail(float3(x * 1.7 + 3.0 * warp1, 4.0) + s));
+
+  float3 base = u.cloudColors[0].rgb;
+  float3 second = u.cloudColors[1].rgb;
+  float3 accent = u.cloudColors[2].rgb;
+  float3 color = mix(base, second, smoothstep(0.35, 0.65, warp1.y));
+  color = mix(color, accent, smoothstep(0.55, 0.8, warp2.y) * 0.7);
+  float3 light = color * density + mix(second, accent, 0.5) * filaments * 0.8;
+  light *= 1.0 - 0.75 * dust;
+  return half4(half3(light), 1.0h);
+}
+
 // --- Pass 2: composite -----------------------------------------------------
 
 // Star layers: outward speed (rho per unit of travel), angular columns,
@@ -237,7 +289,8 @@ static float3 starTint(float h) {
 
 fragment WarpOut warpFragment(
   FullScreenOut in [[stage_in]], constant WarpUniforms& u [[buffer(0)]],
-  texture2d<half> nebula [[texture(0)]], texture2d<half> history [[texture(1)]]
+  texture2d<half> nebula [[texture(0)]], texture2d<half> history [[texture(1)]],
+  texture2d<half> backdrop [[texture(2)]]
 ) {
   constexpr sampler linear(filter::linear, address::clamp_to_edge);
   float2 p = in.uv * u.size;
@@ -253,6 +306,10 @@ fragment WarpOut warpFragment(
     gas += nebula.sample(linear, in.uv + toCenter * (float(i) * tapStep)).rgb;
   }
   float3 color = float3(gas / 5.0h);
+  // The distant backdrop, behind everything; in cruise only (at warp the
+  // clouds are the tunnel and we are far from it).
+  constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
+  color += float3(backdrop.sample(nearest, in.uv).rgb) * (u.backdrop * (1.0 - u.tunnel));
 
   // Stars: soft capsules on a scrolling log-polar grid.
   float dTheta = kTwoPi / kStarColumns;
