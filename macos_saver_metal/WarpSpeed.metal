@@ -307,9 +307,29 @@ fragment WarpOut warpFragment(
   }
   float3 color = float3(gas / 5.0h);
   // The distant backdrop, behind everything; in cruise only (at warp the
-  // clouds are the tunnel and we are far from it).
-  constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
-  color += float3(backdrop.sample(nearest, in.uv).rgb) * (u.backdrop * (1.0 - u.tunnel));
+  // clouds are the tunnel and we are far from it). Entering the tunnel it
+  // is pulled in with it while it fades: sampled at r^(1 + 1.5 tunnel) - the
+  // image drawn outward from the center, stretched along the radius like the
+  // far clouds' sqrt(r) -> rho - and smeared along the radius. Dropping out
+  // it unwarps back into place.
+  float backdropAmount = u.backdrop * (1.0 - u.tunnel);
+  if (backdropAmount > 0.0) {
+    float3 sky;
+    if (u.tunnel <= 0.0) {
+      sky = float3(backdrop.sample(linear, in.uv).rgb);
+    } else {
+      float pulled = q.r * pow(q.r, 1.5 * u.tunnel);  // distance to sample at (shortest side = 1)
+      float scalePx = min(u.size.x, u.size.y);
+      sky = float3(0.0);
+      for (int i = 0; i < 5; i++) {
+        float tapR = pulled * (1.0 - 0.04 * u.tunnel * float(i));
+        float2 tapUV = (u.size * 0.5 + q.dir * tapR * scalePx) / u.size;
+        sky += float3(backdrop.sample(linear, tapUV).rgb);
+      }
+      sky /= 5.0;
+    }
+    color += sky * backdropAmount;
+  }
 
   // Stars: soft capsules on a scrolling log-polar grid.
   float dTheta = kTwoPi / kStarColumns;
