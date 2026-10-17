@@ -138,10 +138,10 @@ final class JumpCycle {
   private var phaseEnd: Double
   let drive = HyperspaceDrive(cruise)
 
-  /// Overridable for testing: STARFIELDS_CRUISE_SECONDS, STARFIELDS_LIGHT_SECONDS.
-  init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-    let cruiseSeconds = environment["STARFIELDS_CRUISE_SECONDS"].flatMap(Double.init) ?? 30
-    let lightSeconds = environment["STARFIELDS_LIGHT_SECONDS"].flatMap(Double.init) ?? 20
+  /// Timing from the saver's settings; without jumps it cruises forever.
+  init(settings: SaverSettings) {
+    let cruiseSeconds = settings.jumps ? settings.cruiseSeconds : .infinity
+    let lightSeconds = settings.lightSeconds
     let brakeSeconds = 0.4
     let creepSeconds = 1.6
     phases = [

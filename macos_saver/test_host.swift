@@ -10,6 +10,7 @@
 //   build/saver/test_host build/saver/Starfields.saver 10 --window
 //   build/saver/test_host <saver> 10 --window --shots 2,4.5 --shot-prefix /tmp/x
 //     (screenshots of the first window at those seconds: /tmp/x-2.0.png, ...)
+//   ... --window --configure   # also opens the saver's configure sheet on it
 //
 // Logs: log show --last 1m --predicate 'subsystem == "com.bosse.starfields.saver"'
 import AppKit
@@ -50,6 +51,9 @@ print("test_host: \(views.count) view(s) started")
 func option(_ name: String) -> String? {
   guard let i = arguments.firstIndex(of: name), i + 1 < arguments.count else { return nil }
   return arguments[i + 1]
+}
+if arguments.contains("--configure"), let sheet = views[0].configureSheet {
+  windows[0].beginSheet(sheet) { _ in print("test_host: sheet closed") }
 }
 if let shots = option("--shots"), let prefix = option("--shot-prefix") {
   for time in shots.split(separator: ",").compactMap({ Double($0) }) {

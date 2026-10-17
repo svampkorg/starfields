@@ -21,17 +21,30 @@ private let log = Logger(subsystem: "com.bosse.starfields.metalsaver", category:
 @objc(StarfieldsMetalSaverView)
 final class StarfieldsMetalSaverView: ScreenSaverView {
   private let metalLayer = CAMetalLayer()
-  private var cycle = JumpCycle()
+  private var settings = SaverSettings.load()
+  private lazy var cycle = JumpCycle(settings: settings)
+  private var sheet: ConfigureSheet?
   private var startTime: CFTimeInterval = 0
   private var stats = FrameStats()
   private var stopObserver: NSObjectProtocol?
   private var displayLink: AnyObject?  // CADisplayLink (macOS 14+)
 
-  /// Same density as the Flutter saver's star count would give.
-  private static let stars = 2000.0
+  /// The System Settings thumbnail shares the host process with the real
+  /// saver. While the saver covers System Settings, the thumbnail's updates
+  /// are throttled, and that dragged every view of the process down to
+  /// ~3 fps. The real saver arrives as a batch of one view per display,
+  /// created after the thumbnail: a view pauses while at least that many
+  /// newer views animate. (Asking for ScreenSaverEngine with
+  /// NSRunningApplication finds nothing inside the sandboxed host.)
+  private static let liveViews = NSHashTable<StarfieldsMetalSaverView>.weakObjects()
+  private let createdAt = CACurrentMediaTime()
+  private var paused = false
+  private var lastPauseCheck: CFTimeInterval = 0
+  private var resumedAt: CFTimeInterval?
 
   override init?(frame: NSRect, isPreview: Bool) {
     super.init(frame: frame, isPreview: isPreview)
+    Self.liveViews.add(self)
     log.notice("init frame=\(NSStringFromRect(frame), privacy: .public) preview=\(isPreview)")
     animationTimeInterval = 1.0 / 120.0
     guard let renderer = Renderer.shared else { return nil }
@@ -67,6 +80,27 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     if let screen = window?.screen { return screen }
     let sameSize = NSScreen.screens.filter { $0.frame.size == bounds.size }
     return sameSize.count == 1 ? sameSize[0] : nil
+  }
+
+  /// The host puts each view into a container (a ScreenSaverView) in a
+  /// display's window. It once put views into the other display's window
+  /// without resizing them (a 1080p picture in a 1440p area), and the
+  /// container is sometimes still 0x0 when the view arrives, so autoresizing
+  /// alone is not enough (a view kept at its creation size grew by the
+  /// container's size: the center ended up top right). The view follows its
+  /// container: here and on every frame.
+  override func viewDidMoveToSuperview() {
+    super.viewDidMoveToSuperview()
+    autoresizingMask = [.width, .height]
+    fitContainer()
+  }
+
+  private func fitContainer() {
+    // The host's container is itself a ScreenSaverView; elsewhere (test_host,
+    // a window's content view) the window sizes the view.
+    guard let container = superview as? ScreenSaverView, frame != container.bounds else { return }
+    log.notice("resized to the container: \(NSStringFromRect(self.frame), privacy: .public) -> \(NSStringFromRect(container.bounds), privacy: .public)")
+    frame = container.bounds
   }
 
   override func viewDidChangeBackingProperties() {
@@ -105,11 +139,18 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
 
   override func startAnimation() {
     super.startAnimation()
+    // The host may call this again without stopAnimation in between: one
+    // display link and observer per view, or it renders several times per frame.
+    stopPacing()
     let screen = window?.screen.map { NSStringFromRect($0.frame) } ?? "none"
     log.notice("startAnimation \(Int(self.bounds.width))x\(Int(self.bounds.height)) @\(self.backingScale)x render \(self.renderScale)x screen=\(screen, privacy: .public)")
+    logWindow()
     updateDrawableSize()
     startTime = CACurrentMediaTime()
-    cycle = JumpCycle()
+    // The settings may have changed in another host process (the System
+    // Settings preview) since this view was created.
+    settings = SaverSettings.load()
+    cycle = JumpCycle(settings: settings)
     stats = FrameStats()
     if #available(macOS 14, *), let screen = displayScreen {
       let link = screen.displayLink(target: self, selector: #selector(displayLinkFired))
@@ -124,20 +165,81 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
       object: nil,
       queue: .main
     ) { [weak self] _ in
+      guard let self else { return }
+      // Meant for the real saver: a covered thumbnail stays started, and the
+      // saver ending is its cue to resume - the host stops it right after
+      // (see stopAnimation), sometimes before the next pause check.
+      if self.paused {
+        self.paused = false
+        self.resumedAt = CACurrentMediaTime()
+        log.notice("willstop notification: the saver ends, thumbnail resumes")
+        return
+      }
       log.notice("willstop notification")
-      self?.stopAnimation()
+      self.stopAnimation()
     }
+    // A new view may complete a set that covers older ones: let them check now.
+    for view in Self.liveViews.allObjects where view !== self { view.lastPauseCheck = 0 }
   }
 
   override func stopAnimation() {
+    if stopObserver != nil {
+      log.notice("stopAnimation after \(CACurrentMediaTime() - self.startTime, format: .fixed(precision: 1)) s")
+    }
+    stopPacing()
+    super.stopAnimation()
+    // When the real saver ends, the host also stops the System Settings
+    // thumbnail, right after it resumed, and never starts it again: the
+    // preview would stay still. Restart it then; a later stop (System
+    // Settings closing) is final.
+    if let resumedAt, CACurrentMediaTime() - resumedAt < 2 {
+      self.resumedAt = nil
+      log.notice("stopped by the host right after the saver ended; restarting the thumbnail")
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        guard let self, self.window != nil, !self.isAnimating else { return }
+        self.startAnimation()
+      }
+    }
+  }
+
+  private func stopPacing() {
     if let stopObserver {
       DistributedNotificationCenter.default().removeObserver(stopObserver)
       self.stopObserver = nil
-      log.notice("stopAnimation after \(CACurrentMediaTime() - self.startTime, format: .fixed(precision: 1)) s")
     }
     if #available(macOS 14, *) { (displayLink as? CADisplayLink)?.invalidate() }
     displayLink = nil
-    super.stopAnimation()
+  }
+
+  /// Diagnostics: what tells the System Settings thumbnail view from a real
+  /// display's view (both full size, both without a screen)?
+  private func logWindow() {
+    guard let window else {
+      log.notice("window: none")
+      return
+    }
+    var chain: [String] = []
+    var view: NSView? = superview
+    while let current = view, chain.count < 6 {
+      chain.append(String(describing: type(of: current)))
+      view = current.superview
+    }
+    log.notice(
+      "window: \(String(describing: type(of: window)), privacy: .public) frame=\(NSStringFromRect(window.frame), privacy: .public) level=\(window.level.rawValue) visible=\(window.isVisible) occlusionVisible=\(window.occlusionState.contains(.visible)) number=\(window.windowNumber) superviews=\(chain.joined(separator: "<"), privacy: .public)"
+    )
+  }
+
+  override var hasConfigureSheet: Bool { true }
+
+  override var configureSheet: NSWindow? {
+    // System Settings asks the 0x0 isPreview view for the sheet; it lives in
+    // another host process than the thumbnail view, which reloads the
+    // settings when the host restarts it.
+    let sheet = ConfigureSheet(settings: SaverSettings.load()) { settings in
+      log.notice("settings saved: \(String(describing: settings), privacy: .public)")
+    }
+    self.sheet = sheet  // the window's controller must outlive this call
+    return sheet.window
   }
 
   override func draw(_ rect: NSRect) {
@@ -153,7 +255,28 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     renderFrame()
   }
 
+  /// Whether newer views (a full set, one per display) took over; checked
+  /// about once a second.
+  private var shouldPause: Bool {
+    let now = CACurrentMediaTime()
+    if now - lastPauseCheck >= 1 {
+      lastPauseCheck = now
+      let newer = Self.liveViews.allObjects.filter { $0 !== self && $0.createdAt > createdAt && $0.isAnimating }
+      let covered = newer.count >= NSScreen.screens.count
+      if covered != paused {
+        paused = covered
+        resumedAt = covered ? nil : now
+        log.notice(
+          "\(Int(self.bounds.width))x\(Int(self.bounds.height)) \(covered ? "paused: \(newer.count) newer views run" : "resumed", privacy: .public)"
+        )
+      }
+    }
+    return paused
+  }
+
   private func renderFrame() {
+    if shouldPause { return }
+    fitContainer()
     stats.ticks += 1
     defer {
       if let report = stats.report(now: CACurrentMediaTime()) {
@@ -169,7 +292,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     let wrap = HyperspaceDrive.row * HyperspaceDrive.rowPeriod
     let uniforms = HyperspaceUniforms(
       size: SIMD2(Float(bounds.width), Float(bounds.height)),
-      density: Float(min(1, Self.stars / HyperspaceDrive.cells)),
+      density: Float(min(1, settings.stars / HyperspaceDrive.cells)),
       // Wrapped in Double so 32-bit GPU floats never see a large value.
       shift: SIMD4(HyperspaceDrive.layerSpeeds.map { Float(($0 * travel).truncatingRemainder(dividingBy: wrap)) }),
       length: SIMD4(HyperspaceDrive.layerSpeeds.map { Float($0 * HyperspaceDrive.lengthPerSpeed * state.stretch) }),
