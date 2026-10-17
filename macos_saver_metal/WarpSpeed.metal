@@ -170,7 +170,9 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
   float3 color = mix(base, second, smoothstep(0.42 - secondBias, 0.6 - secondBias, hue));
   color = mix(color, accent, smoothstep(0.55, 0.72, detail) * detailAccent);
   color = mix(color, accent, smoothstep(0.66, 0.8, hue) * hueAccent);
-  color *= density * u.nebula;
+  // In cruise at half strength, so the distant backdrop shows through; at
+  // warp in full - they are the tunnel then.
+  color *= density * u.nebula * mix(0.5, 1.0, u.tunnel);
 
   // Near clouds, in cruise: faint wisps we drift through - mapped like the
   // stars (rho: they grow as they come closer), stretched along the radius,

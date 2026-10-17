@@ -24,7 +24,7 @@ struct WarpBiomes {
     SIMD3(0.52, 0.34, 0.03),  // warm gold
   ]
 
-  private var generator = SystemRandomNumberGenerator()
+  private var generator = SaverRandom()
   private var biome: [Int]  // palette indices of the biome being arrived at
   private var from: [SIMD3<Float>]  // colors when the fade began
   private var progress = 1.0  // 0 = `from` .. 1 = `biome`
@@ -46,7 +46,7 @@ struct WarpBiomes {
   }
 
   /// Three different palette colors, not the same set as `current`.
-  private static func pick(using generator: inout SystemRandomNumberGenerator, avoiding current: [Int]) -> [Int] {
+  private static func pick(using generator: inout SaverRandom, avoiding current: [Int]) -> [Int] {
     while true {
       let colors = Array(palette.indices.shuffled(using: &generator).prefix(3))
       if Set(colors) != Set(current) { return colors }
@@ -78,5 +78,23 @@ struct WarpBiomes {
     // finishes while the stars slow down.
     progress = min(1, progress + dt / (atWarp ? fadeSeconds : Self.dropOutSeconds))
     colorTime += dt * drift * (1 + Self.warpDrift * speed * speed)
+  }
+}
+
+/// Random numbers for the saver's looks: the system's, or - with
+/// STARFIELDS_SEED set (tests) - a fixed sequence (SplitMix64), so two runs
+/// show the same sky for before/after comparisons.
+struct SaverRandom: RandomNumberGenerator {
+  static let testSeed = ProcessInfo.processInfo.environment["STARFIELDS_SEED"].flatMap(UInt64.init)
+  private var state = SaverRandom.testSeed
+  private var system = SystemRandomNumberGenerator()
+
+  mutating func next() -> UInt64 {
+    guard var z = state else { return system.next() }
+    z &+= 0x9E37_79B9_7F4A_7C15
+    state = z
+    z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+    z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+    return z ^ (z >> 31)
   }
 }

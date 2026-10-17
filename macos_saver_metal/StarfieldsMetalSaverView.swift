@@ -175,7 +175,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     logWindow()
     updateDrawableSize()
     startTime = CACurrentMediaTime()
-    seed = Float.random(in: 0..<100)
+    seed = SaverRandom.testSeed.map { Float($0 % 100) } ?? Float.random(in: 0..<100)
     backdropStale = true
     biomes = WarpBiomes()
     cycle = JumpCycle(settings: settings)
