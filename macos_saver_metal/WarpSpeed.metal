@@ -4,7 +4,9 @@
 //
 //   1. nebulaFragment - gas clouds at a quarter of the resolution into a
 //      texture: value-noise fBm in log-polar coordinates flowing outward,
-//      sampled on a cylinder so it is seamless around the center.
+//      sampled on a cylinder so it is seamless around the center; far
+//      clouds, and in cruise a faint near layer streaming past with the
+//      stars.
 //   2. warpFragment - the gas, blurred along the radius (motion blur), plus
 //      the stars: soft capsules on a scrolling log-polar grid (like
 //      Hyperspace), with size, brightness and tint varying per star, a few
@@ -42,7 +44,7 @@ struct WarpUniforms {
   float lensStreaks;    // streak strength: 1 at warp .. faint in cruise
   float seed;           // per display: its own stars and clouds (0..100)
   float colorTime;      // the clouds' color drift clock (fast at warp)
-  float padding;
+  float nearTravel;     // the near clouds' travel: the stars' (integrated on the CPU)
   float4 cloudColors[3];  // the biome (WarpBiomes.swift): base, second, accent
 };
 
@@ -161,7 +163,30 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
   float3 color = mix(base, second, smoothstep(0.42 - secondBias, 0.6 - secondBias, hue));
   color = mix(color, accent, smoothstep(0.55, 0.72, detail) * detailAccent);
   color = mix(color, accent, smoothstep(0.66, 0.8, hue) * hueAccent);
-  return half4(half3(color * density * u.nebula), 1.0h);
+  color *= density * u.nebula;
+
+  // Near clouds, in cruise: faint wisps we drift through - mapped like the
+  // stars (rho: they grow as they come closer), stretched along the radius,
+  // streaming outward with the stars' travel. One more fBm and a cheap
+  // one-octave hue; the biome's colors. At warp the far clouds become the
+  // tunnel, so these fade out with it.
+  float nearAmount = 1.0 - u.tunnel;
+  if (nearAmount > 0.0) {
+    float nearFlow = q.rho - u.nearTravel;
+    float3 xn = float3(q.dir * 1.6, nearFlow * 0.55) + seedOffset * 1.3 + float3(31.7, 12.9, 4.3);
+    float wisps = fbm(xn);
+    // Like mist: thickest afar (light scattered through all of it), thin
+    // when close and we are in it - emerging near the center, strongest
+    // at mid distance, thinning to ~40 % at the edges (the long edges of a
+    // 16:9 screen are at r ~0.9; to a fifth they all but vanished there).
+    float mist = smoothstep(0.03, 0.15, q.r) * (1.0 - 0.6 * smoothstep(0.2, 1.0, q.r));
+    float nearDensity = smoothstep(0.42, 0.72, wisps) * mist;
+    float nearHue = valueNoise(xn * 0.6 + drift + float3(5.1, 9.3, 2.7));
+    float3 nearColor = mix(base, second, smoothstep(0.35, 0.65, nearHue));
+    nearColor = mix(nearColor, accent, smoothstep(0.72, 0.9, wisps) * 0.5);
+    color += nearColor * nearDensity * 0.5 * nearAmount;
+  }
+  return half4(half3(color), 1.0h);
 }
 
 // --- Pass 2: composite -----------------------------------------------------

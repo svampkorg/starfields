@@ -31,6 +31,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var warpHistoryIndex = 0  // the one written this frame
   private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
   private var lastWarpTravel: Double?  // Warp speed: last frame's star travel, for the trail's stretch
+  private var nearTravel = 0.0  // Warp speed: the near clouds' travel, the stars' integrated
   private var lensFlare = WarpLensFlare()  // Warp speed: now and then a star with an anamorphic streak
   private var biomes = WarpBiomes()  // Warp speed: the clouds' colors, a new biome per jump
   /// Which stars (and Warp speed's clouds): each view draws its own, so the
@@ -425,6 +426,8 @@ extension StarfieldsMetalSaverView {
     let travel = cycle.drive.travel(now) * Self.warpSpeed / JumpCycle.lightSpeed.speed
     let frameTravel = lastWarpTravel.map { min(max(travel - $0, 0), 0.2) } ?? 0
     lastWarpTravel = travel
+    // Near clouds stream with the stars; wrapped like the far clouds' travel.
+    nearTravel = (nearTravel + frameTravel).truncatingRemainder(dividingBy: 1000)
     // Trail (temporal feedback), at warp only. Its strength also follows the
     // speed: none while the stars brake and stretch out at the start of a
     // jump (they barely move), and it shortens as they slow down dropping
@@ -445,7 +448,7 @@ extension StarfieldsMetalSaverView {
       size: SIMD2(Float(bounds.width), Float(bounds.height)),
       travel: Float(travel.truncatingRemainder(dividingBy: 1200)),
       density: Float(min(1, settings.stars / Self.warpCells)),
-      nebula: 1, emerge: 1,
+      nebula: Float(Self.farClouds), emerge: 1,
       blur: warp,
       lines: warp,
       cloudTravel: Float(cloudTravel),
@@ -454,7 +457,7 @@ extension StarfieldsMetalSaverView {
       feedbackZoom: Float(trailZoom),
       lensPos: lens.position, lensDir: lens.direction, lensRho: lens.rho, lensSize: lens.size,
       lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks, seed: seed,
-      colorTime: Float(biomes.colorTime),
+      colorTime: Float(biomes.colorTime), nearTravel: Float(nearTravel),
       cloud0: cloudColors[0], cloud1: cloudColors[1], cloud2: cloudColors[2])
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
     warpHistoryIndex = 1 - warpHistoryIndex
@@ -465,6 +468,10 @@ extension StarfieldsMetalSaverView {
 
   /// Travel per second at warp (rho at layer speed 1).
   fileprivate static let warpSpeed = 1.6
+  /// The far clouds' brightness; STARFIELDS_NEBULA=0 hides them to see the
+  /// near layer alone (tests).
+  fileprivate static let farClouds =
+    ProcessInfo.processInfo.environment["STARFIELDS_NEBULA"].flatMap(Double.init) ?? 1
   /// The clouds' color drift clock in cruise; STARFIELDS_COLOR_SPEED
   /// fast-forwards it (tests).
   fileprivate static let colorSpeed =
@@ -496,7 +503,7 @@ private struct WarpUniforms {
   var lensStreaks: Float
   var seed: Float
   var colorTime: Float
-  var padding: Float = 0
+  var nearTravel: Float
   var cloud0: SIMD4<Float>  // cloudColors[3]
   var cloud1: SIMD4<Float>
   var cloud2: SIMD4<Float>
