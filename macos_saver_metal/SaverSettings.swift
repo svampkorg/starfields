@@ -7,11 +7,15 @@ enum SaverRenderer: String, CaseIterable {
   case hyperspace
   /// The app's Procedural renderer: glowing stars growing out of the center.
   case procedural
+  /// Hand-written Metal (WarpSpeed.metal): gas clouds and motion-blurred
+  /// stars at warp speed.
+  case warp
 
   var title: String {
     switch self {
     case .hyperspace: "Hyperspace"
     case .procedural: "Procedural"
+    case .warp: "Warp speed"
     }
   }
 }
@@ -26,7 +30,7 @@ enum SaverRenderer: String, CaseIterable {
 /// STARFIELDS_CRUISE_SECONDS, STARFIELDS_LIGHT_SECONDS, STARFIELDS_STARS.
 struct SaverSettings: Equatable {
   var renderer = SaverRenderer.hyperspace
-  var jumps = true  // Hyperspace only
+  var jumps = true  // Hyperspace and Warp speed
   var cruiseSeconds = 30.0  // between jumps
   var lightSeconds = 20.0  // at light speed, including the jump itself
   var stars = 2000.0

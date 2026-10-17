@@ -105,8 +105,8 @@ final class ConfigureSheet: NSObject {
   }
 
   private func updateLabels() {
-    // Only Hyperspace jumps to light speed.
-    let hyperspace = selectedRenderer == .hyperspace
+    // Hyperspace and Warp speed jump; Procedural does not.
+    let hyperspace = selectedRenderer != .procedural
     jumps.isEnabled = hyperspace
     // The star range depends on the style; NSSlider clamps its value.
     stars.maxValue = SaverSettings.starsRange(for: selectedRenderer).upperBound

@@ -41,7 +41,7 @@ lipo -create "$OUT/obj/StarfieldsMetal-arm64" "$OUT/obj/StarfieldsMetal-x86_64" 
   -output "$SAVER/Contents/MacOS/StarfieldsMetal"
 
 cp macos_saver_metal/Info.plist "$SAVER/Contents/Info.plist"
-cp macos_saver_metal/FullScreen.metal "$SAVER/Contents/Resources/"
+cp macos_saver_metal/FullScreen.metal macos_saver_metal/WarpSpeed.metal "$SAVER/Contents/Resources/"
 # One shader source: Flutter's own shader compiler turns the runtime-effect
 # GLSL into Metal source (no --iplr: plain MSL text, not a Flutter bundle).
 "$IMPELLERC" --runtime-stage-metal --input-type=frag \

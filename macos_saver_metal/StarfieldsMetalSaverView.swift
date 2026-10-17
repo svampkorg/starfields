@@ -26,6 +26,9 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private lazy var cycle = JumpCycle(settings: settings)
   private var sheet: ConfigureSheet?
   private var procedural = ProceduralLayers()
+  private var warpNebula: MTLTexture?  // Warp speed: the gas clouds, a quarter of the drawable
+  private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
+  private var lastFrameTime: Double?
   private var startTime: CFTimeInterval = 0
   private var stats = FrameStats()
   private var stopObserver: NSObjectProtocol?
@@ -306,6 +309,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     switch settings.renderer {
     case .hyperspace: drawHyperspace(renderer, to: drawable, now: now, gpuTime: gpuTime)
     case .procedural: drawProcedural(renderer, to: drawable, now: now, gpuTime: gpuTime)
+    case .warp: drawWarp(renderer, to: drawable, now: now, gpuTime: gpuTime)
     }
     stats.frame(cpuMillis: (CACurrentMediaTime() - cpuStart) * 1000)
   }
@@ -361,6 +365,66 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   }
 }
 
+extension StarfieldsMetalSaverView {
+  /// WarpSpeed.metal: gas clouds at a quarter of the resolution into
+  /// `warpNebula`, then the composite with the stars. Cruise and warp come
+  /// from the same JumpCycle as Hyperspace: its speed drives the travel, its
+  /// stretch the motion blur and the speed lines.
+  fileprivate func drawWarp(
+    _ renderer: Renderer, to drawable: CAMetalDrawable, now: Double, gpuTime: @escaping (Double) -> Void
+  ) {
+    let width = max(1, drawable.texture.width / 4), height = max(1, drawable.texture.height / 4)
+    if warpNebula?.width != width || warpNebula?.height != height {
+      warpNebula = renderer.makeNebulaTexture(width: width, height: height)
+    }
+    guard let warpNebula else { return }
+    cycle.update(now)
+    let state = cycle.drive.state(now)
+    // 0 in cruise .. 1 at warp (and while the stars stretch out).
+    let stretch = (state.stretch - JumpCycle.cruise.stretch) / (JumpCycle.lightSpeed.stretch - JumpCycle.cruise.stretch)
+    let warp = Float(min(max(stretch, 0), 1))
+    // Clouds: barely moving far away in cruise; at warp they rush past (we
+    // travel through them). Their speed changes, so their travel is
+    // integrated - a changing factor times the total travel would jump.
+    let dt = lastFrameTime.map { min(max(now - $0, 0), 0.1) } ?? 0
+    lastFrameTime = now
+    let cloudSpeed = state.speed / JumpCycle.lightSpeed.speed * Self.warpSpeed * (0.3 + 0.9 * Double(warp))
+    cloudTravel = (cloudTravel + cloudSpeed * dt).truncatingRemainder(dividingBy: 1000)
+    let uniforms = WarpUniforms(
+      size: SIMD2(Float(bounds.width), Float(bounds.height)),
+      // Scaled so that light speed (2.2) travels at the warp speed (1.6).
+      travel: Float((cycle.drive.travel(now) * Self.warpSpeed / JumpCycle.lightSpeed.speed)
+        .truncatingRemainder(dividingBy: 1200)),
+      density: Float(min(1, settings.stars / Self.warpCells)),
+      nebula: 1, emerge: 1,
+      blur: warp,
+      lines: warp,
+      cloudTravel: Float(cloudTravel),
+      tunnel: warp)
+    renderer.drawWarp(to: drawable, nebula: warpNebula, uniforms: uniforms, gpuTime: gpuTime)
+  }
+
+  /// Travel per second at warp (rho at layer speed 1).
+  fileprivate static let warpSpeed = 1.6
+  /// Star cells over all layers that can show a star (5 layers x 360
+  /// columns x ~4.8 rho / 0.32 rho rows); must match WarpSpeed.metal.
+  fileprivate static let warpCells = 5.0 * 360 * 4.8 / 0.32
+}
+
+/// Must match `WarpUniforms` in WarpSpeed.metal.
+private struct WarpUniforms {
+  var size: SIMD2<Float>
+  var travel: Float
+  var density: Float
+  var nebula: Float
+  var emerge: Float
+  var blur: Float
+  var lines: Float
+  var cloudTravel: Float
+  var tunnel: Float
+  var padding = SIMD2<Float>(0, 0)
+}
+
 extension MTLRenderCommandEncoder {
   fileprivate func setFragmentValue<T>(_ value: T, index: Int) {
     withUnsafeBytes(of: value) { setFragmentBytes($0.baseAddress!, length: $0.count, index: index) }
@@ -380,6 +444,8 @@ private final class Renderer {
   let device: MTLDevice
   private let queue: MTLCommandQueue
   private let pipelines: [SaverRenderer: MTLRenderPipelineState]
+  private let nebulaPipeline: MTLRenderPipelineState  // Warp speed, pass 1
+  private let warpPipeline: MTLRenderPipelineState  // Warp speed, pass 2
 
   /// Generated source file and its entry point: impellerc names it
   /// <shader file name>_fragment_main.
@@ -416,6 +482,23 @@ private final class Renderer {
         pipelines[renderer] = try device.makeRenderPipelineState(descriptor: descriptor)
       }
       self.pipelines = pipelines
+
+      // Warp speed: hand-written, with its own vertex stage.
+      guard let warpSource = Self.resource("WarpSpeed") else {
+        log.error("WarpSpeed.metal missing")
+        return nil
+      }
+      let warp = try device.makeLibrary(source: warpSource, options: nil)
+      let nebula = MTLRenderPipelineDescriptor()
+      nebula.vertexFunction = warp.makeFunction(name: "warpVertex")
+      nebula.fragmentFunction = warp.makeFunction(name: "nebulaFragment")
+      nebula.colorAttachments[0].pixelFormat = .rgba16Float
+      nebulaPipeline = try device.makeRenderPipelineState(descriptor: nebula)
+      let composite = MTLRenderPipelineDescriptor()
+      composite.vertexFunction = warp.makeFunction(name: "warpVertex")
+      composite.fragmentFunction = warp.makeFunction(name: "warpFragment")
+      composite.colorAttachments[0].pixelFormat = .bgra8Unorm
+      warpPipeline = try device.makeRenderPipelineState(descriptor: composite)
     } catch {
       log.error("shader compile failed: \(error.localizedDescription, privacy: .public)")
       return nil
@@ -430,6 +513,47 @@ private final class Renderer {
       return nil
     }
     return try? String(contentsOf: url, encoding: .utf8)
+  }
+
+  /// A render target for Warp speed's gas clouds.
+  func makeNebulaTexture(width: Int, height: Int) -> MTLTexture? {
+    let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+      pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)
+    descriptor.usage = [.renderTarget, .shaderRead]
+    descriptor.storageMode = .private
+    return device.makeTexture(descriptor: descriptor)
+  }
+
+  /// Warp speed: the gas clouds into `nebula`, then the composite into the
+  /// drawable, in one command buffer.
+  func drawWarp(
+    to drawable: CAMetalDrawable, nebula: MTLTexture, uniforms: WarpUniforms, gpuTime: @escaping (Double) -> Void
+  ) {
+    guard let buffer = queue.makeCommandBuffer() else { return }
+    var u = uniforms
+    let gasPass = MTLRenderPassDescriptor()
+    gasPass.colorAttachments[0].texture = nebula
+    gasPass.colorAttachments[0].loadAction = .dontCare
+    gasPass.colorAttachments[0].storeAction = .store
+    if let encoder = buffer.makeRenderCommandEncoder(descriptor: gasPass) {
+      encoder.setRenderPipelineState(nebulaPipeline)
+      encoder.setFragmentBytes(&u, length: MemoryLayout<WarpUniforms>.stride, index: 0)
+      encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+      encoder.endEncoding()
+    }
+    let pass = MTLRenderPassDescriptor()
+    pass.colorAttachments[0].texture = drawable.texture
+    pass.colorAttachments[0].loadAction = .dontCare
+    pass.colorAttachments[0].storeAction = .store
+    guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+    encoder.setRenderPipelineState(warpPipeline)
+    encoder.setFragmentBytes(&u, length: MemoryLayout<WarpUniforms>.stride, index: 0)
+    encoder.setFragmentTexture(nebula, index: 0)
+    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+    encoder.endEncoding()
+    buffer.present(drawable)
+    buffer.addCompletedHandler { buffer in gpuTime((buffer.gpuEndTime - buffer.gpuStartTime) * 1000) }
+    buffer.commit()
   }
 
   /// Encodes and presents one frame of `renderer`; `bind` sets its fragment
