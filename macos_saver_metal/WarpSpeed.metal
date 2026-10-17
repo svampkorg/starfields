@@ -41,6 +41,9 @@ struct WarpUniforms {
   float lensFlicker;    // ~0.7..1.3, changing fast
   float lensStreaks;    // streak strength: 1 at warp .. faint in cruise
   float seed;           // per display: its own stars and clouds (0..100)
+  float colorTime;      // the clouds' color drift clock (fast at warp)
+  float padding;
+  float4 cloudColors[3];  // the biome (WarpBiomes.swift): base, second, accent
 };
 
 struct FullScreenOut {
@@ -132,7 +135,10 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
   float3 x = float3(q.dir * 2.2 * mix(0.5 + 1.7 * q.r, 1.0, u.tunnel), flow * 0.85) + seedOffset;
   float clouds = fbm(x);
   float detail = fbm(x * 1.9 + float3(11.3, 4.1, 7.7));
-  float hue = fbm(float3(q.dir * 0.9, flow * 0.3 + 5.0) + seedOffset);
+  // Color drift, part 1: the hue field moves slowly through the noise, so
+  // patches change color over a minute or two.
+  float3 drift = float3(0.7, 0.4, 0.25) * (u.colorTime * 0.012);
+  float hue = fbm(float3(q.dir * 0.9, flow * 0.3 + 5.0) + seedOffset + drift);
 
   // Dark in the middle, strongest at mid distance, fading towards the edges.
   // In cruise the clouds reach closer to the center (the far direction).
@@ -140,13 +146,21 @@ fragment half4 nebulaFragment(FullScreenOut in [[stage_in]], constant WarpUnifor
                 (1.0 - 0.55 * smoothstep(0.7, 1.4, q.r));
   float density = smoothstep(0.42, 0.82, clouds * 0.75 + detail * 0.35) * shape;
 
-  float3 blue = float3(0.09, 0.16, 0.42);
-  float3 purple = float3(0.28, 0.14, 0.42);
-  float3 teal = float3(0.04, 0.27, 0.28);
-  float3 red = float3(0.42, 0.07, 0.10);
-  float3 color = mix(blue, purple, smoothstep(0.42, 0.6, hue));
-  color = mix(color, teal, smoothstep(0.55, 0.72, detail) * 0.8);
-  color = mix(color, red, smoothstep(0.66, 0.8, hue) * 0.7);
+  // The biome's three colors: base and second by the hue field, the accent
+  // in the fine detail and in the rare high-hue patches.
+  float3 base = u.cloudColors[0].rgb;
+  float3 second = u.cloudColors[1].rgb;
+  float3 accent = u.cloudColors[2].rgb;
+  // Color drift, part 2: the mood - how much of the second color and the
+  // accent - follows slow waves (5, 7 and 11 minutes of the drift clock),
+  // with phases of the display's own.
+  float t = u.colorTime * kTwoPi;
+  float secondBias = 0.08 * sin(t / 300.0 + u.seed);
+  float detailAccent = 0.8 * (0.75 + 0.35 * sin(t / 420.0 + u.seed * 1.7));
+  float hueAccent = 0.7 * (0.7 + 0.4 * sin(t / 660.0 + u.seed * 2.3));
+  float3 color = mix(base, second, smoothstep(0.42 - secondBias, 0.6 - secondBias, hue));
+  color = mix(color, accent, smoothstep(0.55, 0.72, detail) * detailAccent);
+  color = mix(color, accent, smoothstep(0.66, 0.8, hue) * hueAccent);
   return half4(half3(color * density * u.nebula), 1.0h);
 }
 

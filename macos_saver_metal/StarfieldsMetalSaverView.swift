@@ -32,6 +32,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
   private var cloudTravel = 0.0  // Warp speed: the clouds' travel, integrated per frame
   private var lastWarpTravel: Double?  // Warp speed: last frame's star travel, for the trail's stretch
   private var lensFlare = WarpLensFlare()  // Warp speed: now and then a star with an anamorphic streak
+  private var biomes = WarpBiomes()  // Warp speed: the clouds' colors, a new biome per jump
   /// Which stars (and Warp speed's clouds): each view draws its own, so the
   /// displays don't all show the same sky. New on every start - the host
   /// often gives a view no screen to tell displays apart by.
@@ -172,6 +173,7 @@ final class StarfieldsMetalSaverView: ScreenSaverView {
     updateDrawableSize()
     startTime = CACurrentMediaTime()
     seed = Float.random(in: 0..<100)
+    biomes = WarpBiomes()
     cycle = JumpCycle(settings: settings)
     stats = FrameStats()
     if #available(macOS 14, *), let screen = displayScreen {
@@ -429,6 +431,8 @@ extension StarfieldsMetalSaverView {
     // a smaller share keeps every echo behind its star, at any speed - a
     // fixed zoom overtook slow stars, and their trail pointed outward.
     let trailZoom = exp(-settings.trailStretch * frameTravel)
+    biomes.update(dt: dt, speed: speed, drift: Self.colorSpeed)
+    let cloudColors = biomes.colors.map { SIMD4($0, 0) }
     let lens = lensFlare.update(
       time: now, travel: travel, speed: speed, size: SIMD2(Double(bounds.width), Double(bounds.height)))
     let uniforms = WarpUniforms(
@@ -443,7 +447,9 @@ extension StarfieldsMetalSaverView {
       feedbackDecay: Float(trailWeight),
       feedbackZoom: Float(trailZoom),
       lensPos: lens.position, lensDir: lens.direction, lensRho: lens.rho, lensSize: lens.size,
-      lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks, seed: seed)
+      lensBright: lens.brightness, lensFlicker: lens.flicker, lensStreaks: lens.streaks, seed: seed,
+      colorTime: Float(biomes.colorTime),
+      cloud0: cloudColors[0], cloud1: cloudColors[1], cloud2: cloudColors[2])
     let read = warpHistory[1 - warpHistoryIndex], write = warpHistory[warpHistoryIndex]
     warpHistoryIndex = 1 - warpHistoryIndex
     renderer.drawWarp(
@@ -453,6 +459,10 @@ extension StarfieldsMetalSaverView {
 
   /// Travel per second at warp (rho at layer speed 1).
   fileprivate static let warpSpeed = 1.6
+  /// The clouds' color drift clock in cruise; STARFIELDS_COLOR_SPEED
+  /// fast-forwards it (tests).
+  fileprivate static let colorSpeed =
+    ProcessInfo.processInfo.environment["STARFIELDS_COLOR_SPEED"].flatMap(Double.init) ?? 1
   /// Star cells over all layers that can show a star (5 layers x 360
   /// columns x ~4.8 rho / 0.32 rho rows); must match WarpSpeed.metal.
   fileprivate static let warpCells = 5.0 * 360 * 4.8 / 0.32
@@ -479,6 +489,11 @@ private struct WarpUniforms {
   var lensFlicker: Float
   var lensStreaks: Float
   var seed: Float
+  var colorTime: Float
+  var padding: Float = 0
+  var cloud0: SIMD4<Float>  // cloudColors[3]
+  var cloud1: SIMD4<Float>
+  var cloud2: SIMD4<Float>
 }
 
 extension MTLRenderCommandEncoder {
